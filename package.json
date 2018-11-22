@@ -1,0 +1,14 @@
+{
+  "name": "node-hdbconnect",
+  "version": "0.1.0",
+  "description": "hana database driver for node - wraps hdbconnect",
+  "main": "lib/index.js",
+  "author": "Pascal Seitz <pascal.seitz@gmail.com>",
+  "license": "MIT",
+  "dependencies": {
+    "neon-cli": "^0.2.0"
+  },
+  "scripts": {
+    "install": "neon build"
+  }
+}

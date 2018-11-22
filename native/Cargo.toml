@@ -1,0 +1,22 @@
+[package]
+name = "node-hdbconnect"
+version = "0.1.0"
+authors = ["Pascal Seitz <pascal.seitz@gmail.com>"]
+license = "MIT"
+build = "build.rs"
+exclude = ["artifacts.json", "index.node"]
+
+[lib]
+name = "node_hdbconnect"
+crate-type = ["dylib"]
+
+[build-dependencies]
+neon-build = "0.2.0"
+
+[dependencies]
+neon = "0.2.0"
+hdbconnect = "0.9.1"
+neon-serde = "0.1.1"
+serde_derive = "1.0.80"
+serde = "1.0.80"
+lazy_static = "1.2.0"
