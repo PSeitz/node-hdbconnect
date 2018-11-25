@@ -11,7 +11,7 @@ extern crate parking_lot;
 
 use std::collections::HashMap;
 use std::sync::Mutex;
-use hdbconnect::{Connection, HdbResult, HdbError, IntoConnectParams};
+use hdbconnect::{Connection, HdbResult, HdbError, HdbValue, IntoConnectParams};
 use hdbconnect::ConnectParams;
 use parking_lot::RwLock;
 lazy_static! {
@@ -56,7 +56,7 @@ fn drop_client(mut cx: FunctionContext) -> JsResult<JsString> {
 struct ConnectTask(ConnectParams);
 
 impl Task for ConnectTask {
-    type Output = String;
+    type Output = String; // the connection id
     type Error = HdbError;
     type JsEvent = JsString;
 
@@ -68,8 +68,11 @@ impl Task for ConnectTask {
         Ok(id)
     }
 
-    fn complete(self, mut cx: TaskContext, result: Result<Self::Output, Self::Error>) -> JsResult<Self::JsEvent> {
-        Ok(cx.string(result.unwrap()))
+    fn complete(self, mut cx: TaskContext, res: Result<Self::Output, Self::Error>) -> JsResult<Self::JsEvent> {
+        match res {
+            Ok(res) => Ok(cx.string(res)),
+            Err(res) => cx.throw_error(&format!("{:?}", res)),
+        }
     }
 }
 
@@ -277,36 +280,299 @@ fn convert_vec_to_array(mut cx: FunctionContext, data: Vec<Vec<String>>, header:
 }
 
 
+// macro_rules! to_buffer {
+//     ($cx:ident, $el:ident) => {
+//         let mut dat = $cx.buffer($el.len() as u32).unwrap();
+//         cx.borrow_mut(&mut dat, |data| {
+//             let slice = data.as_mut_slice::<u8>();
+//             slice.clone_from_slice(&$el);
+//         });
+//         return Ok(dat.upcast());
+
+//     }
+// }
+
+fn hdb_value_to_js<'a>(mut cx: &mut TaskContext<'a>, val: HdbValue) -> JsResult<'a, JsValue> {
+
+    match val {
+        HdbValue::NOTHING => {
+            return Ok(cx.undefined().upcast());
+        }
+        HdbValue::TINYINT(el) => {
+            return Ok(cx.number(el as f64).upcast())
+        }
+        HdbValue::SMALLINT(el) => {
+            return Ok(cx.number(el as f64).upcast())
+        }
+        HdbValue::INT(el) => {
+            return Ok(cx.number(el as f64).upcast())
+        }
+        HdbValue::BIGINT(el) => {
+            return Ok(cx.number(el as f64).upcast())
+        }
+        // HdbValue::DECIMAL(BigDecimal) => {
+            
+        // }
+        HdbValue::REAL(el) => {
+            return Ok(cx.number(el as f64).upcast())
+        }
+        HdbValue::DOUBLE(el) => {
+            return Ok(cx.number(el as f64).upcast())
+        }
+        HdbValue::CHAR(el) | HdbValue::VARCHAR(el) | HdbValue::NCHAR(el) | HdbValue::NVARCHAR(el) => {
+            return Ok(cx.string(el).upcast())
+        }
+        HdbValue::BINARY(el) | HdbValue::VARBINARY(el) | HdbValue::BSTRING(el) => {
+            let mut dat = cx.buffer(el.len() as u32).unwrap();
+            cx.borrow_mut(&mut dat, |data| {
+                let slice = data.as_mut_slice::<u8>();
+                slice.clone_from_slice(&el);
+            });
+            return Ok(dat.upcast())
+        }
+        // HdbValue::CLOB(CLob) => {
+            
+        // }
+        // HdbValue::NCLOB(NCLob) => {
+            
+        // }
+        // HdbValue::BLOB(BLob) => {
+            
+        // }
+        HdbValue::BOOLEAN(el) => {
+            return Ok(cx.boolean(el).upcast())
+        }
+        HdbValue::STRING(el) => {
+            return Ok(cx.string(el).upcast())
+        }
+        HdbValue::NSTRING(el) => {
+            return Ok(cx.string(el).upcast())
+        }
+        // HdbValue::SMALLDECIMAL(BigDecimal) => {
+            
+        // }
+        HdbValue::TEXT(el) => {
+            return Ok(cx.string(el).upcast())
+        }
+        HdbValue::SHORTTEXT(el) => {
+            return Ok(cx.string(el).upcast())
+        }
+        // HdbValue::LONGDATE(LongDate) => {
+            
+        // }
+        // HdbValue::SECONDDATE(SecondDate) => {
+            
+        // }
+        // HdbValue::DAYDATE(DayDate) => {
+            
+        // }
+        // HdbValue::SECONDTIME(SecondTime) => {
+            
+        // }
+        HdbValue::N_TINYINT(el) => {
+            if let Some(el) = el {
+                return Ok(cx.number(el as f64).upcast());
+            }
+            return Ok(cx.undefined().upcast());
+            
+        }
+        HdbValue::N_SMALLINT(el) => {
+            if let Some(el) = el {
+                return Ok(cx.number(el as f64).upcast());
+            }
+            return Ok(cx.undefined().upcast());
+            
+        }
+        HdbValue::N_INT(el) => {
+            if let Some(el) = el {
+                return Ok(cx.number(el as f64).upcast());
+            }
+            return Ok(cx.undefined().upcast());
+            
+        }
+        // HdbValue::N_BIGINT(Option<i64>) => {
+            
+        // }
+        // HdbValue::N_DECIMAL(Option<BigDecimal>) => {
+            
+        // }
+        HdbValue::N_REAL(el) => {
+            if let Some(el) = el {
+                return Ok(cx.number(el).upcast());
+            }
+            return Ok(cx.undefined().upcast());
+            
+        }
+        HdbValue::N_DOUBLE(el) => {
+            if let Some(el) = el {
+                return Ok(cx.number(el).upcast());
+            }
+            return Ok(cx.undefined().upcast());
+            
+        }
+        HdbValue::N_CHAR(el) => {
+            if let Some(el) = el {
+                return Ok(cx.string(el).upcast());
+            }
+            return Ok(cx.undefined().upcast());
+            
+        }
+        HdbValue::N_VARCHAR(el) => {
+            if let Some(el) = el {
+                return Ok(cx.string(el).upcast());
+            }
+            return Ok(cx.undefined().upcast());
+            
+        }
+        HdbValue::N_NCHAR(el) => {
+            if let Some(el) = el {
+                return Ok(cx.string(el).upcast());
+            }
+            return Ok(cx.undefined().upcast());
+            
+        }
+        HdbValue::N_NVARCHAR(el) => {
+            if let Some(el) = el {
+                return Ok(cx.string(el).upcast());
+            }
+            return Ok(cx.undefined().upcast());
+            
+        }
+        HdbValue::N_BINARY(el) | HdbValue::N_VARBINARY(el) | HdbValue::N_BSTRING(el) => {
+            if let Some(el) = el {
+                let mut dat = cx.buffer(el.len() as u32).unwrap();
+                cx.borrow_mut(&mut dat, |data| {
+                    let slice = data.as_mut_slice::<u8>();
+                    slice.clone_from_slice(&el);
+                });
+                return Ok(dat.upcast());
+            }
+            return Ok(cx.undefined().upcast());
+        }
+        // HdbValue::N_CLOB(Option<CLob>) => {
+            
+        // }
+        // HdbValue::N_NCLOB(Option<NCLob>) => {
+            
+        // }
+        // HdbValue::N_BLOB(Option<BLob>) => {
+            
+        // }
+        HdbValue::N_BOOLEAN(el) => {
+            if let Some(el) = el {
+                return Ok(cx.boolean(el).upcast())
+            }
+            return Ok(cx.undefined().upcast());
+            
+        }
+        HdbValue::N_STRING(el) => {
+            if let Some(el) = el {
+                return Ok(cx.string(el).upcast());
+            }
+            return Ok(cx.undefined().upcast());
+            
+        }
+        HdbValue::N_NSTRING(el) => {
+            if let Some(el) = el {
+                return Ok(cx.string(el).upcast());
+            }
+            return Ok(cx.undefined().upcast());
+            
+        }
+        // HdbValue::N_SMALLDECIMAL(Option<BigDecimal>) => {
+            
+        // }
+        HdbValue::N_TEXT(el) => {
+            if let Some(el) = el {
+                return Ok(cx.string(el).upcast());
+            }
+            return Ok(cx.undefined().upcast());
+            
+        }
+        HdbValue::N_SHORTTEXT(el) => {
+            if let Some(el) = el {
+                return Ok(cx.string(el).upcast());
+            }
+            return Ok(cx.undefined().upcast());
+            
+        }
+        // HdbValue::N_SECONDDATE(Option<SecondDate>) => {
+            
+        // }
+        // HdbValue::N_DAYDATE(Option<DayDate>) => {
+            
+        // }
+        // HdbValue::N_SECONDTIME(Option<SecondTime>) => {
+            
+        // }
+
+        _ => {}
+    }
+
+    Ok(cx.undefined().upcast())
+
+
+
+}
+
+fn convert_rs<'a>(mut cx: &mut TaskContext<'a>, mut rs: ResultSet) -> JsResult<'a, JsArray> {
+
+    let js_array = JsArray::new(cx, 0);
+
+    let mut i = 0;
+    for row in rs {
+        let mut row = row.unwrap();
+        let js_object = JsObject::new(cx);
+        let mut j = 0;
+        let len = row.len();
+        row.reverse_values();
+        while let Some(col_val) = row.pop() {
+            let col_name = cx.string(row.get_fieldname(len - j -1).unwrap());
+            let mut col_val = hdb_value_to_js(cx,col_val).unwrap();
+            js_object.set(cx, col_name, col_val).unwrap();
+            j+=1;
+        }
+        let _  = js_array.set(cx, i as u32, js_object);
+        i += 1;
+    }
+    Ok(js_array)
+}
+
+
+struct QueryTask{
+    query:String,
+    conn_id: String,
+}
+
+impl Task for QueryTask {
+    type Output = ResultSet; // the result
+    type Error = HdbError;
+    type JsEvent = JsValue;
+
+    fn perform(&self) -> Result<Self::Output, Self::Error> {
+        let mut map = HASHMAP.write();
+        let connection = map.get_mut(&self.conn_id).unwrap();
+        let res:HdbResult<ResultSet> = connection.query(&self.query);
+        Ok(res?)
+    }
+
+    fn complete(self, mut cx: TaskContext, res: Result<Self::Output, Self::Error>) -> JsResult<Self::JsEvent> {
+        match res {
+            Ok(res) => Ok(convert_rs(&mut cx, res).unwrap().upcast()),
+            Err(res) => cx.throw_error(&format!("{:?}", res)),
+        }
+    }
+}
+
 
 
 // // This generic method can handle all kinds of calls, and thus has the most complex return type. In many cases it will be more appropriate to use one of the methods query(), dml(), exec(), which have the adequate simple result type you usually want.
-fn query(mut cx:FunctionContext) -> JsResult<JsValue>{ //HdbResult<ResultSet>
-    let client_id = cx.argument::<JsString>(0)?.value();
-    let stmt = cx.argument::<JsString>(1)?.value();
-    let mut map = HASHMAP.write();
-    let connection = map.get_mut(&client_id).unwrap();
-    let res:HdbResult<ResultSet> = connection.query(&stmt);
-    match res {
-        Ok(res) => {
-            let mut column_names = vec![];
-            {
-                let meta = res.metadata();
-                for i in 0..meta.number_of_fields() {
-                    column_names.push(meta.columnname(i).unwrap().to_string());
-                }
-            }
-            let res: Vec<Vec<String>> = res.try_into().unwrap();
-            return Ok(convert_vec_to_array(cx, res, column_names).unwrap().upcast())
-            // let js_object = JsObject::new(&mut cx);
-            // return Ok(js_object.upcast())
-        },
-        Err(err) => {
-            let js_object = JsObject::new(&mut cx);
-            let js_string = cx.string(format!("{:?}", err));
-            js_object.set(&mut cx, "error", js_string).unwrap();
-            return Ok(js_object.upcast())
-        },
-    }
+fn query(mut cx:FunctionContext) -> JsResult<JsUndefined>{ //HdbResult<ResultSet>
+    let conn_id = cx.argument::<JsString>(0)?.value();
+    let query = cx.argument::<JsString>(1)?.value();
+    let f = cx.argument::<JsFunction>(2)?;
+    QueryTask{conn_id, query}.schedule(f);
+    Ok(cx.undefined())
 }
 
 // // Executes a statement and expects a single ResultSet.
