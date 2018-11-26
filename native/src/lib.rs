@@ -1,9 +1,10 @@
 #[macro_use]
 extern crate neon;
 extern crate hdbconnect;
+extern crate chashmap;
 use hdbconnect::ResultSet;
 use neon::prelude::*;
-
+use chashmap::CHashMap;
 
 #[macro_use]
 extern crate lazy_static;
@@ -11,15 +12,38 @@ extern crate parking_lot;
 
 use std::collections::HashMap;
 use std::sync::Mutex;
-use hdbconnect::{Connection, HdbResult, HdbError, HdbValue, IntoConnectParams};
+use hdbconnect::{Connection, HdbResult, HdbError, HdbValue, PreparedStatement, IntoConnectParams};
 use hdbconnect::ConnectParams;
 use parking_lot::RwLock;
 lazy_static! {
-    static ref HASHMAP: RwLock<HashMap<String, Connection>> = {
-        RwLock::new(HashMap::new())
+    static ref CONNECTIONS: CHashMap<String, Connection> = {
+        CHashMap::with_capacity(50)
+    };
+    static ref PREPARED_STATEMENTS: CHashMap<String, Mutex<PreparedStatement>> = {
+        CHashMap::with_capacity(50)
     };
 }
 
+macro_rules! check_res {
+    ($res:ident,$cx:ident, $success:block) => (
+        match $res {
+            Ok(res) => $success,
+            Err(err) => {
+                let js_object = JsObject::new(&mut $cx);
+                let js_string = $cx.string(format!("{:?}", err));
+                js_object.set(&mut $cx, "error", js_string).unwrap();
+                return Ok(js_object.upcast())
+            },
+        }
+    )
+}
+macro_rules! check_res_undefined {
+    ($res:ident,$cx:ident) => (
+        check_res!($res, $cx,  {
+            return Ok($cx.undefined().upcast())
+        });
+    )
+}
 
 fn create_client(mut cx: FunctionContext) -> JsResult<JsUndefined> {
 
@@ -47,8 +71,7 @@ fn create_client(mut cx: FunctionContext) -> JsResult<JsUndefined> {
 fn drop_client(mut cx: FunctionContext) -> JsResult<JsString> {
 //     cx.check_argument::<JsString>(0)?;
     let arg0 = cx.argument::<JsString>(0)?.value();
-    let mut map = HASHMAP.write();
-    map.remove(&arg0);
+    (*CONNECTIONS).remove(&arg0);
     Ok(cx.string("connection closed"))
 }
 
@@ -63,8 +86,7 @@ impl Task for ConnectTask {
     fn perform(&self) -> Result<Self::Output, Self::Error> {
         let connection = Connection::new(self.0.clone())?;
         let id = nanoid::simple();
-        let mut map = HASHMAP.write();
-        map.insert(id.to_string(), connection);
+        (*CONNECTIONS).insert_new(id.to_string(), connection);
         Ok(id)
     }
 
@@ -91,86 +113,54 @@ impl Task for ConnectTask {
 
 // fn new(mut cx:FunctionContext, params: ConnectParams) -> HdbResult<Connection>{
 //     let client_id = cx.argument::<JsString>(0)?.value();
-//     let mut map = HASHMAP.lock().unwrap();
+//     let mut map = (*CONNECTIONS).lock().unwrap();
 //     let connection = map.get(&client_id).unwrap();
 // }
-
 
 
 fn set_auto_commit(mut cx:FunctionContext) -> JsResult<JsValue>{
     let client_id = cx.argument::<JsString>(0)?.value();
     let val = cx.argument::<JsBoolean>(1)?.value();
-    let mut map = HASHMAP.write();
-    let connection = map.get_mut(&client_id).unwrap();
-    let res = connection.set_auto_commit(val);
-    let js_object = JsObject::new(&mut cx);
-    if res.is_err() {
-        let js_string = cx.string(format!("{:?}", res));
-        js_object.set(&mut cx, "error", js_string).unwrap();
-    }
-    Ok(js_object.upcast())
+    let res = (*CONNECTIONS).get_mut(&client_id).unwrap().set_auto_commit(val);
+
+    check_res_undefined!(res, cx);
 }
 
 fn is_auto_commit(mut cx:FunctionContext) -> JsResult<JsValue>{ //HdbResult<bool>
     let client_id = cx.argument::<JsString>(0)?.value();
-    let map = HASHMAP.read();
-    let connection = map.get(&client_id).unwrap();
+    let connection = (*CONNECTIONS).get(&client_id).unwrap();
     let res = connection.is_auto_commit();
-    let js_object = JsObject::new(&mut cx);
-    if res.is_err() {
-        let js_string = cx.string(format!("{:?}", res));
-        js_object.set(&mut cx, "error", js_string).unwrap();
-    }else{
-        let val = cx.boolean(res.unwrap());
-        js_object.set(&mut cx, "val", val).unwrap();
-    }
-    Ok(js_object.upcast())
+    check_res!(res, cx,  {
+        return Ok(cx.boolean(res.unwrap()).upcast())
+    });
 }
 
 fn set_fetch_size(mut cx:FunctionContext) -> JsResult<JsValue>{ //HdbResult<()>
     let client_id = cx.argument::<JsString>(0)?.value();
     let val = cx.argument::<JsNumber>(1)?.value();
-    let mut map = HASHMAP.write();
-    let connection = map.get_mut(&client_id).unwrap();
-    let res = connection.set_fetch_size(val as u32);
-    let js_object = JsObject::new(&mut cx);
-    if res.is_err() {
-        let js_string = cx.string(format!("{:?}", res));
-        js_object.set(&mut cx, "error", js_string).unwrap();
-    }
-    Ok(js_object.upcast())
+    let res = (*CONNECTIONS).get_mut(&client_id).unwrap().set_fetch_size(val as u32);
+    check_res_undefined!(res, cx);
 }
 
-// fn get_lob_read_length(mut cx:FunctionContext) -> JsResult<JsValue>{ //HdbResult<i32>
-//     let client_id = cx.argument::<JsString>(0)?.value();
-//     let map = HASHMAP.read();
-//     let connection = map.get(&client_id).unwrap();
-//     let res = connection.get_lob_read_length();
-//     let js_object = JsObject::new(&mut cx);
-//     if res.is_err() {
-//         let js_string = cx.string(format!("{:?}", res));
-//         js_object.set(&mut cx, "error", js_string).unwrap();
-//     }
-//     Ok(js_object.upcast())
-// }
+fn get_lob_read_length(mut cx:FunctionContext) -> JsResult<JsValue>{ //HdbResult<i32>
+    let client_id = cx.argument::<JsString>(0)?.value();
+    let connection = (*CONNECTIONS).get(&client_id).unwrap();
+    let res = connection.get_lob_read_length();
+    check_res!(res, cx,  {
+        return Ok(cx.number(res.unwrap() as f64).upcast())
+    });
+}
 
-// fn set_lob_read_length(mut cx:FunctionContext, lob_read_length: i32) -> JsResult<JsValue>{ //HdbResult<()>
-//     let client_id = cx.argument::<JsString>(0)?.value();
-//     let mut map = HASHMAP.write();
-//     let connection = map.get_mut(&client_id).unwrap();
-//     let res = connection.set_lob_read_length();
-//     let js_object = JsObject::new(&mut cx);
-//     if res.is_err() {
-//         let js_string = cx.string(format!("{:?}", res));
-//         js_object.set(&mut cx, "error", js_string).unwrap();
-//     }
-//     Ok(js_object.upcast())
-// }
+fn set_lob_read_length(mut cx:FunctionContext) -> JsResult<JsValue>{ //HdbResult<()>
+    let client_id = cx.argument::<JsString>(0)?.value();
+    let val = cx.argument::<JsNumber>(1)?.value();
+    let res = (*CONNECTIONS).get_mut(&client_id).unwrap().set_lob_read_length(val as i32);
+    check_res_undefined!(res, cx);
+}
 
 // fn get_server_resource_consumption_info(mut cx:FunctionContext ) -> JsResult<JsValue>{ //HdbResult<ServerResourceConsumptionInfo>
 //     let client_id = cx.argument::<JsString>(0)?.value();
-//     let map = HASHMAP.read();
-//     let connection = map.get(&client_id).unwrap();
+//     let connection = (*CONNECTIONS).get(&client_id).unwrap();
 //     let res = connection.get_server_resource_consumption_info();
 //     let js_object = JsObject::new(&mut cx);
 //     if res.is_err() {
@@ -179,76 +169,44 @@ fn set_fetch_size(mut cx:FunctionContext) -> JsResult<JsValue>{ //HdbResult<()>
 //     }
 //     Ok(js_object.upcast())
 // }
-// fn get_call_count(mut cx:FunctionContext) -> JsResult<JsValue>{ //HdbResult<i32>
-//     let client_id = cx.argument::<JsString>(0)?.value();
-//     let map = HASHMAP.read();
-//     let connection = map.get(&client_id).unwrap();
-//     let res = connection.get_call_count();
-//     let js_object = JsObject::new(&mut cx);
-//     if res.is_err() {
-//         let js_string = cx.string(format!("{:?}", res));
-//         js_object.set(&mut cx, "error", js_string).unwrap();
-//     }
-//     Ok(js_object.upcast())
-// }
+fn get_call_count(mut cx:FunctionContext) -> JsResult<JsValue>{ //HdbResult<i32>
+    let client_id = cx.argument::<JsString>(0)?.value();
+    let res = (*CONNECTIONS).get(&client_id).unwrap().get_call_count();
+    check_res!(res, cx,  {
+        return Ok(cx.number(res.unwrap() as f64).upcast())
+    });
+}
 
 fn set_application_user(mut cx:FunctionContext) -> JsResult<JsValue>{ //HdbResult<()>
     let client_id = cx.argument::<JsString>(0)?.value();
     let appl_user = cx.argument::<JsString>(1)?.value();
-    let map = HASHMAP.read();
-    let connection = map.get(&client_id).unwrap();
-    let res = connection.set_application_user(&appl_user);
-    let js_object = JsObject::new(&mut cx);
-    if res.is_err() {
-        let js_string = cx.string(format!("{:?}", res));
-        js_object.set(&mut cx, "error", js_string).unwrap();
-    }
-    Ok(js_object.upcast())
+    let res = (*CONNECTIONS).get_mut(&client_id).unwrap().set_application_user(&appl_user);
+    check_res_undefined!(res, cx);
 }
 
 // // connection.set_application_user("K2209657")?;
 
-// fn set_application_version(mut cx:FunctionContext) -> JsResult<JsValue>{ //HdbResult<()>
-//     let client_id = cx.argument::<JsString>(0)?.value();
-//     let version = cx.argument::<JsString>(1)?.value();
-//     let mut map = HASHMAP.write();
-//     let connection = map.get_mut(&client_id).unwrap();
-//     let res = connection.set_application_version(&version);
-//     let js_object = JsObject::new(&mut cx);
-//     if res.is_err() {
-//         let js_string = cx.string(format!("{:?}", res));
-//         js_object.set(&mut cx, "error", js_string).unwrap();
-//     }
-//     Ok(js_object.upcast())
-// }
+fn set_application_version(mut cx:FunctionContext) -> JsResult<JsValue>{ //HdbResult<()>
+    let client_id = cx.argument::<JsString>(0)?.value();
+    let version = cx.argument::<JsString>(1)?.value();
+    let res = (*CONNECTIONS).get_mut(&client_id).unwrap().set_application_version(&version);
+    check_res_undefined!(res, cx);
+}
 
-// // connection.set_application_version("5.3.23")?;
-
-// fn set_application_source(mut cx:FunctionContext) -> JsResult<JsValue>{ //HdbResult<()>
-//     let client_id = cx.argument::<JsString>(0)?.value();
-//     let source = cx.argument::<JsString>(1)?.value();
-//     let mut map = HASHMAP.write();
-//     let connection = map.get_mut(&client_id).unwrap();
-//     let res = connection.set_application_source(&source);
-//     let js_object = JsObject::new(&mut cx);
-//     if res.is_err() {
-//         let js_string = cx.string(format!("{:?}", res));
-//         js_object.set(&mut cx, "error", js_string).unwrap();
-//     }
-//     Ok(js_object.upcast())
-// }
+fn set_application_source(mut cx:FunctionContext) -> JsResult<JsValue>{ //HdbResult<()>
+    let client_id = cx.argument::<JsString>(0)?.value();
+    let source = cx.argument::<JsString>(1)?.value();
+    let res = (*CONNECTIONS).get_mut(&client_id).unwrap().set_application_source(&source);
+    check_res_undefined!(res, cx);
+}
 
 // // Sets client information into a session variable on the server.
-
-
 // // connection.set_application_source("5.3.23","update_customer.rs")?;
 
 // fn statement(mut cx:FunctionContext) -> JsResult<JsValue>{ //HdbResult<HdbResponse>
 //     let client_id = cx.argument::<JsString>(0)?.value();
 //     let stmt = cx.argument::<JsString>(1)?.value();
-//     let mut map = HASHMAP.write();
-//     let connection = map.get_mut(&client_id).unwrap();
-//     let res = connection.statement(&stmt);
+//     let res (*CONNECTIONS).get_mut(&client_id).unwrap() connection.statement(&stmt);
 //     let js_object = JsObject::new(&mut cx);
 //     if res.is_err() {
 //         let js_string = cx.string(format!("{:?}", res));
@@ -512,7 +470,6 @@ fn hdb_value_to_js<'a>(mut cx: &mut TaskContext<'a>, val: HdbValue) -> JsResult<
     Ok(cx.undefined().upcast())
 
 
-
 }
 
 fn convert_rs<'a>(mut cx: &mut TaskContext<'a>, mut rs: ResultSet) -> JsResult<'a, JsArray> {
@@ -550,9 +507,7 @@ impl Task for QueryTask {
     type JsEvent = JsValue;
 
     fn perform(&self) -> Result<Self::Output, Self::Error> {
-        let mut map = HASHMAP.write();
-        let connection = map.get_mut(&self.conn_id).unwrap();
-        let res:HdbResult<ResultSet> = connection.query(&self.query);
+        let res:HdbResult<ResultSet> = (*CONNECTIONS).get_mut(&self.conn_id).unwrap().query(&self.query);
         Ok(res?)
     }
 
@@ -579,9 +534,7 @@ fn query(mut cx:FunctionContext) -> JsResult<JsUndefined>{ //HdbResult<ResultSet
 // fn dml(mut cx:FunctionContext) -> JsResult<JsValue>{ //HdbResult<usize>
 //     let client_id = cx.argument::<JsString>(0)?.value();
 //     let stmt = cx.argument::<JsString>(1)?.value();
-//     let mut map = write()();
-//     let connection = map.get_mut(&client_id).unwrap();
-//     let res = connection.dml(&stmt);
+//     let res (*CONNECTIONS).get_mut(&client_id).unwrap() connection.dml(&stmt);
 //     let js_object = JsObject::new(&mut cx);
 //     match res {
 //         Ok(res) => {
@@ -602,9 +555,7 @@ fn query(mut cx:FunctionContext) -> JsResult<JsUndefined>{ //HdbResult<ResultSet
 // fn exec(mut cx:FunctionContext) -> JsResult<JsValue>{ //HdbResult<()>
 //     let client_id = cx.argument::<JsString>(0)?.value();
 //     let stmt = cx.argument::<JsString>(1)?.value();
-//     let mut map = HASHMAP.write();
-//     let connection = map.get_mut(&client_id).unwrap();
-//     let res = connection.exec(&stmt);
+//     let res (*CONNECTIONS).get_mut(&client_id).unwrap() connection.exec(&stmt);
 //     let js_object = JsObject::new(&mut cx);
 //     match res {
 //         Ok(res) => {
@@ -621,80 +572,63 @@ fn query(mut cx:FunctionContext) -> JsResult<JsUndefined>{ //HdbResult<ResultSet
 //     }
 // }
 
-// // Executes a statement and expects a plain success.
-// fn prepare(mut cx:FunctionContext) -> JsResult<JsValue>{ //HdbResult<PreparedStatement>
-//     let client_id = cx.argument::<JsString>(0)?.value();
-//.     let stmt = cx.argument::<JsString>(1)?.value();
-//     let mut map = HASHMAread.unwrap();
-//     let connection = map.get(&client_id).unwrap();
-//     let res = connection.prepare(&stmt);
-//     let js_object = JsObject::new(&mut cx);
-//     match res {
-//         Ok(res) => {
-//             let _res: Vec<Vec<String>> = res.try_into().unwrap();
-//             let js_object = JsObject::new(&mut cx);
-//             return Ok(js_object.upcast())
-//         },
-//         Err(err) => {
-//             let js_object = JsObject::new(&mut cx);
-//             let js_string = cx.string(format!("{:?}", err));
-//             js_object.set(&mut cx, "error", js_string).unwrap();
-//             return Ok(js_object.upcast())
-//         },
-//     }
-// }
+
+struct PrepareStatementTask{
+    stmt:String,
+    conn_id: String,
+}
+impl Task for PrepareStatementTask {
+    type Output = String; // the prepared statement id
+    type Error = HdbError;
+    type JsEvent = JsString;
+
+    fn perform(&self) -> Result<Self::Output, Self::Error> {
+        let prepared_statement = (*CONNECTIONS).get_mut(&self.conn_id).unwrap().prepare(&self.stmt)?;
+        let id = nanoid::simple();
+        (*PREPARED_STATEMENTS).insert_new(id.to_string(), Mutex::new(prepared_statement));
+        Ok(id)
+    }
+
+    fn complete(self, mut cx: TaskContext, res: Result<Self::Output, Self::Error>) -> JsResult<Self::JsEvent> {
+        match res {
+            Ok(res) => Ok(cx.string(res)),
+            Err(res) => cx.throw_error(&format!("{:?}", res)),
+        }
+    }
+}
+
+// Executes a statement and expects a plain success.
+fn prepare(mut cx:FunctionContext) -> JsResult<JsUndefined>{ //HdbResult<PreparedStatement>
+    let conn_id = cx.argument::<JsString>(0)?.value();
+    let stmt = cx.argument::<JsString>(1)?.value();
+    let f = cx.argument::<JsFunction>(2)?;
+    PrepareStatementTask{
+        conn_id, stmt
+    }.schedule(f);
+    Ok(cx.undefined())
+}
 
 // // Prepares a statement and returns a handle to it.
 
-// // Note that the handle keeps using the same connection.
-// fn commit(mut cx:FunctionContext) -> JsResult<JsValue>{ //HdbResult<()>
-//     let client_id = cx.argument::<JsString>(0)?.value();
-//     let mut map = HASHMAP.write();
-//     let connection = map.get_mut(&client_id).unwrap();
-//     let res = connection.commit();
-//     let js_object = JsObject::new(&mut cx);
-//     match res {
-//         Ok(res) => {
-//             let _res: Vec<Vec<String>> = res.try_into().unwrap();
-//             let js_object = JsObject::new(&mut cx);
-//             return Ok(js_object.upcast())
-//         },
-//         Err(err) => {
-//             let js_object = JsObject::new(&mut cx);
-//             let js_string = cx.string(format!("{:?}", err));
-//             js_object.set(&mut cx, "error", js_string).unwrap();
-//             return Ok(js_object.upcast())
-//         },
-//     }
-// }
 
-// // Commits the current transaction.
-// fn rollback(mut cx:FunctionContext) -> JsResult<JsValue>{ //HdbResult<()>
-//     let client_id = cx.argument::<JsString>(0)?.value();
-//     let mut map = HASHMAP.write();
-//     let connection = map.get_mut(&client_id).unwrap();
-//     let res = connection.rollback();
-//     let js_object = JsObject::new(&mut cx);
-//     match res {
-//         Ok(res) => {
-//             let _res: Vec<Vec<String>> = res.try_into().unwrap();
-//             let js_object = JsObject::new(&mut cx);
-//             return Ok(js_object.upcast())
-//         },
-//         Err(err) => {
-//             let js_object = JsObject::new(&mut cx);
-//             let js_string = cx.string(format!("{:?}", err));
-//             js_object.set(&mut cx, "error", js_string).unwrap();
-//             return Ok(js_object.upcast())
-//         },
-//     }
-// }
+fn commit(mut cx:FunctionContext) -> JsResult<JsValue>{ //HdbResult<()>
+    let client_id = cx.argument::<JsString>(0)?.value();
+    let res = (*CONNECTIONS).get_mut(&client_id).unwrap().commit();
+    check_res_undefined!(res, cx);
+}
+
+
+// Commits the current transaction.
+fn rollback(mut cx:FunctionContext) -> JsResult<JsValue>{ //HdbResult<()>
+    let client_id = cx.argument::<JsString>(0)?.value();
+    let res = (*CONNECTIONS).get_mut(&client_id).unwrap().rollback();
+    check_res_undefined!(res, cx);
+}
 
 // // Rolls back the current transaction.
 // fn spawn(mut cx:FunctionContext) -> JsResult<JsValue>{ //HdbResult<Connection>
 //     let client_id = cx.argument::<JsString>(0)?.value();
-//     let mut map = HASHread.unwrap();
-//     let connection = map.get(&client_id).unwrap();
+//     let connection = (*CONNECTIONS).get(&client_id).unwrap();
 //     let res = connection.spawn();
 //     let js_object = JsObject::new(&mut cx);
 //     match res {
@@ -715,9 +649,7 @@ fn query(mut cx:FunctionContext) -> JsResult<JsUndefined>{ //HdbResult<ResultSet
 // // Creates a new connection object with the same settings and authentication.
 // fn multiple_statements_ignore_err<mut cx:FunctionContext, S: AsRef<str>>(&mut self, stmts: Vec<S>){
 //     let client_id = cx.argument::<JsString>(0)?.value();
-//     let mut map = HASHMAP.write();
-//     let connection = map.get_mut(&client_id).unwrap();
-//     let res = connection.multiple_statements_ignore_err();
+//     let res (*CONNECTIONS).get_mut(&client_id).unwrap() connection.multiple_statements_ignore_err();
 //     let js_object = JsObject::new(&mut cx);
 //     match res {
 //         Ok(res) => {
@@ -737,8 +669,7 @@ fn query(mut cx:FunctionContext) -> JsResult<JsUndefined>{ //HdbResult<ResultSet
 // // Utility method to fire a couple of statements, ignoring errors and return values
 // fn multiple_statements<mut cx:FunctionContext, S: AsRef<str>>({
 //     let client_id = cx.argument::<JsString>(0)?.value();
-//     let mut map = HASHMAP.lock().unwrap();
-//     let connection = map.get(&client_id).unwrap();
+//     let connection = (*CONNECTIONS).get(&client_id).unwrap();
 //     let res = connection.multiple_statements();
 //     let js_object = JsObject::new(&mut cx);
 //     match res {
@@ -762,8 +693,7 @@ fn query(mut cx:FunctionContext) -> JsResult<JsUndefined>{ //HdbResult<ResultSet
 // // Utility method to fire a couple of statements, ignoring their return values; the method returns with the first error, or with ()
 // fn pop_warnings(mut cx:FunctionContext) -> HdbResult<Option<Vec<ServerError>>>{
 //     let client_id = cx.argument::<JsString>(0)?.value();
-//     let map = HASHMAP.read();
-//     let connection = map.get(&client_id).unwrap();
+//     let connection = (*CONNECTIONS).get(&client_id).unwrap();
 //     let res = connection.pop_warnings();
 //     let js_object = JsObject::new(&mut cx);
 //     match res {
@@ -784,8 +714,7 @@ fn query(mut cx:FunctionContext) -> JsResult<JsUndefined>{ //HdbResult<ResultSet
 // // Returns warnings that were returned from the server since the last call to this method.
 // fn get_resource_manager(mut cx:FunctionContext) -> Box<dyn ResourceManager>{
 //     let client_id = cx.argument::<JsString>(0)?.value();
-//     let map = HASHMAP.read();
-//     let connection = map.get(&client_id).unwrap();
+//     let connection = (*HASHMAP).get(&client_id).unwrap();
 //.     let res = connection.get_resource_manager();
 //     let js_object = JsObject::new(&mut cx);
 //.    match res {
@@ -810,6 +739,21 @@ fn query(mut cx:FunctionContext) -> JsResult<JsUndefined>{ //HdbResult<ResultSet
 
 
 
+// Commits the current transaction.
+fn add_batch(mut cx:FunctionContext) -> JsResult<JsValue>{ //HdbResult<()>
+    let prepared_statement_id = cx.argument::<JsString>(0)?.value();
+
+    let data = cx.argument::<JsArray>(1)?;
+
+    // let v: Handle<JsValue> = cx.number(17).upcast();
+    // v.is_a::<JsString>(); // false
+    // v.is_a::<JsNumber>(); // true
+    // v.is_a::<JsValue>();  // true
+    let mut prepo = (*PREPARED_STATEMENTS).get_mut(&prepared_statement_id);
+    let mut prep = prepo.as_mut().unwrap().lock().unwrap();
+    let res = prep.add_batch(&[1]); // TODO
+    check_res_undefined!(res, cx);
+}
 
 
 
@@ -819,9 +763,15 @@ fn query(mut cx:FunctionContext) -> JsResult<JsUndefined>{ //HdbResult<ResultSet
 
 
 
-
-
-
+// exec
+// get_server_resource_consumption_info
+// statement
+// dml
+// spawn
+// multiple_statements_ignore_err
+// multiple_statements
+// pop_warnings
+// get_resource_manager
 
 
 
@@ -833,6 +783,18 @@ register_module!(mut cx, {
     cx.export_function("createClient", create_client)?;
     cx.export_function("dropClient", drop_client)?;
     cx.export_function("query", query)?;
+    cx.export_function("set_auto_commit", set_auto_commit)?;
+    cx.export_function("is_auto_commit", is_auto_commit)?;
+    cx.export_function("set_fetch_size", set_fetch_size)?;
+    cx.export_function("get_lob_read_length", get_lob_read_length)?;
+    cx.export_function("set_lob_read_length", set_lob_read_length)?;
+    cx.export_function("get_call_count", get_call_count)?;
+    cx.export_function("set_application_user", set_application_user)?;
+    cx.export_function("set_application_version", set_application_version)?;
+    cx.export_function("set_application_source", set_application_source)?;
+    cx.export_function("prepare", prepare)?;
+    cx.export_function("commit", commit)?;
+    cx.export_function("rollback", rollback)?;
 //     cx.export_function("dropClient", drop_client)?;
 //.     cx.export_function("createClient", createClient)
 

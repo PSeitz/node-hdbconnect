@@ -1,7 +1,7 @@
 let hdb = require('.');
 
-
-hdb.createClient({"host": "hxehost","port": 39015 ,"user": "SYSTEM","password": ""}, (err, connection) => {
+// 
+hdb.createClient({"host": "","port": 39015 ,"user": "SYSTEM","password": ""}, (err, connection) => {
     if (err) {
     	console.log(err)
     }else{
