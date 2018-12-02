@@ -9,12 +9,16 @@ use chashmap::CHashMap;
 #[macro_use]
 extern crate lazy_static;
 extern crate parking_lot;
+extern crate serde_db;
 
 use std::collections::HashMap;
-use std::sync::Mutex;
-use hdbconnect::{Connection, HdbResult, HdbError, HdbValue, PreparedStatement, IntoConnectParams};
+// use std::sync::Mutex;
+use hdbconnect::{Connection, HdbResult, HdbError, HdbValue, HdbResponse, PreparedStatement, HdbReturnValue, ParameterRow, Parameters, ParameterDescriptor, IntoConnectParams};
 use hdbconnect::ConnectParams;
 use parking_lot::RwLock;
+use parking_lot::Mutex;
+
+
 lazy_static! {
     static ref CONNECTIONS: CHashMap<String, Connection> = {
         CHashMap::with_capacity(50)
@@ -215,27 +219,26 @@ fn set_application_source(mut cx:FunctionContext) -> JsResult<JsValue>{ //HdbRes
 //     Ok(js_object.upcast())
 // }
 
-// // Executes a statement on the database.
 
-fn convert_vec_to_array(mut cx: FunctionContext, data: Vec<Vec<String>>, header: Vec<String>) -> JsResult<JsArray> {
+// fn convert_vec_to_array(mut cx: FunctionContext, data: Vec<Vec<String>>, header: Vec<String>) -> JsResult<JsArray> {
 
-    // Create the JS array
-    let js_array = JsArray::new(&mut cx, data.len() as u32);
+//     // Create the JS array
+//     let js_array = JsArray::new(&mut cx, data.len() as u32);
 
-    // Iterate over the rust Vec and map each value in the Vec to the JS array
-    for (i, row) in data.iter().enumerate() {
-        let js_object = JsObject::new(&mut cx);
-        for (j, col) in row.iter().enumerate() {
-            let col_name = cx.string(&header[j]);
-            let col_val = cx.string(col);
-            js_object.set(&mut cx, col_name, col_val).unwrap();
-        }
-        // let js_string = cx.string(obj);
-        let _  = js_array.set(&mut cx, i as u32, js_object);
-    }
+//     // Iterate over the rust Vec and map each value in the Vec to the JS array
+//     for (i, row) in data.iter().enumerate() {
+//         let js_object = JsObject::new(&mut cx);
+//         for (j, col) in row.iter().enumerate() {
+//             let col_name = cx.string(&header[j]);
+//             let col_val = cx.string(col);
+//             js_object.set(&mut cx, col_name, col_val).unwrap();
+//         }
+//         // let js_string = cx.string(obj);
+//         let _  = js_array.set(&mut cx, i as u32, js_object);
+//     }
 
-    Ok(js_array)
-}
+//     Ok(js_array)
+// }
 
 
 // macro_rules! to_buffer {
@@ -250,7 +253,7 @@ fn convert_vec_to_array(mut cx: FunctionContext, data: Vec<Vec<String>>, header:
 //     }
 // }
 
-fn hdb_value_to_js<'a>(mut cx: &mut TaskContext<'a>, val: HdbValue) -> JsResult<'a, JsValue> {
+fn hdb_value_to_js<'a>(cx: &mut TaskContext<'a>, val: HdbValue) -> JsResult<'a, JsValue> {
 
     match val {
         HdbValue::NOTHING => {
@@ -472,7 +475,7 @@ fn hdb_value_to_js<'a>(mut cx: &mut TaskContext<'a>, val: HdbValue) -> JsResult<
 
 }
 
-fn convert_rs<'a>(mut cx: &mut TaskContext<'a>, mut rs: ResultSet) -> JsResult<'a, JsArray> {
+fn convert_rs<'a>(cx: &mut TaskContext<'a>, rs: ResultSet) -> JsResult<'a, JsArray> {
 
     let js_array = JsArray::new(cx, 0);
 
@@ -484,7 +487,8 @@ fn convert_rs<'a>(mut cx: &mut TaskContext<'a>, mut rs: ResultSet) -> JsResult<'
         let len = row.len();
         row.reverse_values();
         while let Some(col_val) = row.pop() {
-            let col_name = cx.string(row.get_fieldname(len - j -1).unwrap());
+            // let col_name = cx.string(row.get_fieldname(len - j -1).unwrap());
+            let col_name = cx.string(row.get_fieldname(j).unwrap());
             let mut col_val = hdb_value_to_js(cx,col_val).unwrap();
             js_object.set(cx, col_name, col_val).unwrap();
             j+=1;
@@ -519,8 +523,6 @@ impl Task for QueryTask {
     }
 }
 
-
-
 // // This generic method can handle all kinds of calls, and thus has the most complex return type. In many cases it will be more appropriate to use one of the methods query(), dml(), exec(), which have the adequate simple result type you usually want.
 fn query(mut cx:FunctionContext) -> JsResult<JsUndefined>{ //HdbResult<ResultSet>
     let conn_id = cx.argument::<JsString>(0)?.value();
@@ -530,47 +532,68 @@ fn query(mut cx:FunctionContext) -> JsResult<JsUndefined>{ //HdbResult<ResultSet
     Ok(cx.undefined())
 }
 
-// // Executes a statement and expects a single ResultSet.
-// fn dml(mut cx:FunctionContext) -> JsResult<JsValue>{ //HdbResult<usize>
-//     let client_id = cx.argument::<JsString>(0)?.value();
-//     let stmt = cx.argument::<JsString>(1)?.value();
-//     let res (*CONNECTIONS).get_mut(&client_id).unwrap() connection.dml(&stmt);
-//     let js_object = JsObject::new(&mut cx);
-//     match res {
-//         Ok(res) => {
-//             let _res: Vec<Vec<String>> = res.try_into().unwrap();
-//             let js_object = JsObject::new(&mut cx);
-//             return Ok(js_object.upcast())
-//         },
-//         Err(err) => {
-//             let js_object = JsObject::new(&mut cx);
-//             let js_string = cx.string(format!("{:?}", err));
-//             js_object.set(&mut cx, "error", js_string).unwrap();
-//             return Ok(js_object.upcast())
-//         },
-//     }
-// }
+struct ExecTask{
+    query:String,
+    conn_id: String,
+}
 
-// // Executes a statement and expects a single number of affected rows.
-// fn exec(mut cx:FunctionContext) -> JsResult<JsValue>{ //HdbResult<()>
-//     let client_id = cx.argument::<JsString>(0)?.value();
-//     let stmt = cx.argument::<JsString>(1)?.value();
-//     let res (*CONNECTIONS).get_mut(&client_id).unwrap() connection.exec(&stmt);
-//     let js_object = JsObject::new(&mut cx);
-//     match res {
-//         Ok(res) => {
-//             let _res: Vec<Vec<String>> = res.try_into().unwrap();
-//             let js_object = JsObject::new(&mut cx);
-//             return Ok(js_object.upcast())
-//         },
-//         Err(err) => {
-//             let js_object = JsObject::new(&mut cx);
-//             let js_string = cx.string(format!("{:?}", err));
-//             js_object.set(&mut cx, "error", js_string).unwrap();
-//             return Ok(js_object.upcast())
-//         },
-//     }
-// }
+impl Task for ExecTask {
+    type Output = ();
+    type Error = HdbError;
+    type JsEvent = JsUndefined;
+
+    fn perform(&self) -> Result<Self::Output, Self::Error> {
+        let res:HdbResult<()> = (*CONNECTIONS).get_mut(&self.conn_id).unwrap().exec(&self.query);
+        Ok(res?)
+    }
+
+    fn complete(self, mut cx: TaskContext, res: Result<Self::Output, Self::Error>) -> JsResult<Self::JsEvent> {
+        match res {
+            Ok(_) => Ok(cx.undefined()),
+            Err(res) => cx.throw_error(&format!("{:?}", res)),
+        }
+    }
+}
+
+fn exec(mut cx:FunctionContext) -> JsResult<JsUndefined>{ //HdbResult<ResultSet>
+    let conn_id = cx.argument::<JsString>(0)?.value();
+    let query = cx.argument::<JsString>(1)?.value();
+    let f = cx.argument::<JsFunction>(2)?;
+    ExecTask{conn_id, query}.schedule(f);
+    Ok(cx.undefined())
+}
+
+
+struct DmlTask{
+    query:String,
+    conn_id: String,
+}
+
+impl Task for DmlTask {
+    type Output = usize;
+    type Error = HdbError;
+    type JsEvent = JsNumber;
+
+    fn perform(&self) -> Result<Self::Output, Self::Error> {
+        let res:HdbResult<usize> = (*CONNECTIONS).get_mut(&self.conn_id).unwrap().dml(&self.query);
+        Ok(res?)
+    }
+
+    fn complete(self, mut cx: TaskContext, res: Result<Self::Output, Self::Error>) -> JsResult<Self::JsEvent> {
+        match res {
+            Ok(res) => Ok(cx.number(res as f64)),
+            Err(res) => cx.throw_error(&format!("{:?}", res)),
+        }
+    }
+}
+
+fn dml(mut cx:FunctionContext) -> JsResult<JsUndefined>{ //HdbResult<ResultSet>
+    let conn_id = cx.argument::<JsString>(0)?.value();
+    let query = cx.argument::<JsString>(1)?.value();
+    let f = cx.argument::<JsFunction>(2)?;
+    DmlTask{conn_id, query}.schedule(f);
+    Ok(cx.undefined())
+}
 
 
 struct PrepareStatementTask{
@@ -645,6 +668,42 @@ fn rollback(mut cx:FunctionContext) -> JsResult<JsValue>{ //HdbResult<()>
 //         },
 //     }
 // }
+
+
+struct MultipleStatementsIgnoreErr{
+    queries:Vec<String>,
+    conn_id: String,
+}
+
+impl Task for MultipleStatementsIgnoreErr {
+    type Output = (); // the result
+    type Error = HdbError;
+    type JsEvent = JsUndefined;
+
+    fn perform(&self) -> Result<Self::Output, Self::Error> {
+        let res = (*CONNECTIONS).get_mut(&self.conn_id).unwrap().multiple_statements_ignore_err(self.queries.clone());
+        Ok(res)
+    }
+
+    fn complete(self, mut cx: TaskContext, res: Result<Self::Output, Self::Error>) -> JsResult<Self::JsEvent> {
+        match res {
+            Ok(_) => Ok(cx.undefined()),
+            Err(res) => cx.throw_error(&format!("{:?}", res)),
+        }
+    }
+}
+
+
+// // This generic method can handle all kinds of calls, and thus has the most complex return type. In many cases it will be more appropriate to use one of the methods query(), dml(), exec(), which have the adequate simple result type you usually want.
+fn multiple_statements_ignore_err(mut cx:FunctionContext) -> JsResult<JsUndefined>{ //HdbResult<ResultSet>
+    let conn_id = cx.argument::<JsString>(0)?.value();
+    let queries:Vec<_> = cx.argument::<JsArray>(1)?.to_vec(&mut cx)?;
+    let queries:Vec<_> = queries.iter().map(|v|v.downcast::<JsString>().unwrap().value()).collect();
+    let f = cx.argument::<JsFunction>(2)?;
+    MultipleStatementsIgnoreErr{conn_id, queries}.schedule(f);
+    Ok(cx.undefined())
+}
+
 
 // // Creates a new connection object with the same settings and authentication.
 // fn multiple_statements_ignore_err<mut cx:FunctionContext, S: AsRef<str>>(&mut self, stmts: Vec<S>){
@@ -739,42 +798,190 @@ fn rollback(mut cx:FunctionContext) -> JsResult<JsValue>{ //HdbResult<()>
 
 
 
+use serde_db::ser::to_params;
+use serde_db::ser::SerializationError;
+
 // Commits the current transaction.
-fn add_batch(mut cx:FunctionContext) -> JsResult<JsValue>{ //HdbResult<()>
+fn add_row(mut cx:FunctionContext) -> JsResult<JsValue>{ //HdbResult<()>
     let prepared_statement_id = cx.argument::<JsString>(0)?.value();
 
     let data = cx.argument::<JsArray>(1)?;
 
-    // let v: Handle<JsValue> = cx.number(17).upcast();
-    // v.is_a::<JsString>(); // false
-    // v.is_a::<JsNumber>(); // true
-    // v.is_a::<JsValue>();  // true
+    let vec: Vec<Handle<JsValue>> = data.to_vec(&mut cx)?;
+
+    // let meta_slice = &metadata[vec.len().. vec.len() + 1];
+    // let val = to_params(val, meta_slice)?.pop().unwrap();
+    // vec.last_mut().map(|row|&mut row.values).unwrap().push(val);
+
     let mut prepo = (*PREPARED_STATEMENTS).get_mut(&prepared_statement_id);
-    let mut prep = prepo.as_mut().unwrap().lock().unwrap();
-    let res = prep.add_batch(&[1]); // TODO
-    check_res_undefined!(res, cx);
+    let mut prep = prepo.as_mut().unwrap().lock();
+
+    if prep.input_parameter_descriptors().is_some() {
+        let data = {
+            let params_desc = prep.input_parameter_descriptors().unwrap();
+            let data:Vec<HdbValue> = vec.into_iter().enumerate().map(|(i, val)| {
+                js_to_hdb_value(&mut cx, val, params_desc[i].clone())
+            }).collect();
+            ParameterRow::new(data)
+        };
+        let res = prep.add_row(data);
+        check_res_undefined!(res, cx);
+    }
+
+    // if let Some(params_desc) = prep.input_parameter_descriptors() {
+
+    //     let data:Vec<HdbValue> = vec.into_iter().enumerate().map(|(i, val)| {
+    //         js_to_hdb_value(&mut cx, val, params_desc[i].clone())
+    //     }).collect();
+    //     let data = ParameterRow::new(data);
+    //     let res = prep.add_row(data);
+    //     // for (i, val) in vec.iter().enumerate() {
+
+    //     // }
+
+
+    // }
+    
+    return Ok(cx.undefined().upcast())
+    // let data:Vec<HdbValue> = vec.into_iter().map(|el|js_to_hdb_value(&mut cx, el)).collect();
+    // println!("{:?}", data);
+    // let data = ParameterRow::new(data);
+    // // let v: Handle<JsValue> = cx.number(17).upcast();
+    // // v.is_a::<JsString>(); // false
+    // // v.is_a::<JsNumber>(); // true
+    // // v.is_a::<JsValue>();  // true
+    
+    // // let res = prep.add_batch(&[1]); // TODO
+    // let res = prep.add_row(data); // TODO
+    // check_res_undefined!(res, cx);
 }
 
 
+struct ExecPreparedStatementTask{
+    prepared_statement_id: String,
+}
+
+impl Task for ExecPreparedStatementTask {
+    type Output = HdbResponse; // the result
+    type Error = HdbError;
+    type JsEvent = JsValue;
+
+    fn perform(&self) -> Result<Self::Output, Self::Error> {
+        let prep = (*PREPARED_STATEMENTS).get_mut(&self.prepared_statement_id).unwrap();
+        let res:HdbResult<HdbResponse> = prep.lock().execute_batch();
+        Ok(res?)
+    }
+
+    fn complete(self, mut cx: TaskContext, res: Result<Self::Output, Self::Error>) -> JsResult<Self::JsEvent> {
+        match res {
+            Ok(res) => {
+                if res.count() == 1{
+                    let mut data = res.data;
+                    let mut el = data.remove(0);
+                    match el {
+                        HdbReturnValue::ResultSet(rs) => {
+                            return Ok(convert_rs(&mut cx, rs).unwrap().upcast());
+                        },
+                        HdbReturnValue::AffectedRows(data) => {
+
+                            let js_array = JsArray::new(&mut cx, data.len() as u32);
+                            for (i, num) in data.iter().enumerate() {
+                                let num = cx.number(*num as f64);
+                                let _  = js_array.set(&mut cx, i as u32, num);
+                            }
+
+                            return Ok(js_array.upcast());
+                        },
+                        HdbReturnValue::OutputParameters(out) => {
+                            // unimplemented!()
+                            return cx.throw_error("OutputParameters not implemented");
+                            // return Ok(cx.string("outputs").upcast());
+                        },
+                        HdbReturnValue::Success => {
+                            return Ok(cx.string("success").upcast());
+                        },
+                        HdbReturnValue::XaTransactionIds(trans_id) => {
+                            // unimplemented!()
+                            // return Ok(cx.string("someids").upcast());
+                            return cx.throw_error("XaTransactionIds not implemented");
+                        },
+                        
+                    }
+                    
+                }else{
+                    unimplemented!()
+                    // let data = res.get_data();
+                    // for el in data {
+                    // }
+                }
+            },
+            Err(res) => cx.throw_error(&format!("{:?}", res)),
+        }
+    }
+}
+
+// Commits the current transaction.
+fn execute_batch(mut cx:FunctionContext) -> JsResult<JsUndefined>{ //HdbResult<()>
+    let prepared_statement_id = cx.argument::<JsString>(0)?.value();
+    let f = cx.argument::<JsFunction>(1)?;
+    ExecPreparedStatementTask{prepared_statement_id}.schedule(f);
+    Ok(cx.undefined())
+}
+
+
+fn js_to_hdb_value<'a>(_cx: &mut FunctionContext<'a>, v: Handle<JsValue>, desc: ParameterDescriptor) -> HdbValue {
+    let params = &[desc];
+    if v.is_a::<JsString>() {
+        let v = v.downcast::<JsString>().unwrap().value();
+        return to_params(&v, params).unwrap().pop().unwrap();
+    }
+    if v.is_a::<JsNumber>() {
+        let v = v.downcast::<JsNumber>().unwrap().value();
+        if let Ok(mut val) = to_params(&v, params ) {
+            return val.pop().unwrap()
+        }
+        if let Ok(mut val) = to_params(&(v as u64), params) {
+            return val.pop().unwrap()
+        }
+    }
+    if v.is_a::<JsUndefined>() {
+        // let val:Option<String> = None;
+        // return to_params(&val, params).unwrap().pop().unwrap();
+        return HdbValue::N_TEXT(None);
+    }
+    panic!("not implemented");
+
+}
+
+
+// fn js_to_hdb_value<'a>(mut cx: &mut FunctionContext<'a>, v: Handle<JsValue>) -> HdbValue {
+//     if v.is_a::<JsString>() {
+
+//         let v = v.downcast::<JsString>().unwrap().value();
+//         return HdbValue::STRING(v);
+//     }
+//     if v.is_a::<JsNumber>() {
+//         let v = v.downcast::<JsNumber>().unwrap().value();
+//         return HdbValue::DOUBLE(v);
+//         // return HdbValue::NVARCHAR(v)
+//     }
+//     // if v.is_a::<JsUndefined>() {
+//     //     return HdbValue::DOUBLE(v);
+//     // }
+//     panic!("not implemented");
+
+// }
 
 
 
 
-
-
-
-// exec
 // get_server_resource_consumption_info
 // statement
 // dml
 // spawn
-// multiple_statements_ignore_err
 // multiple_statements
 // pop_warnings
 // get_resource_manager
-
-
-
 
 
 
@@ -783,6 +990,9 @@ register_module!(mut cx, {
     cx.export_function("createClient", create_client)?;
     cx.export_function("dropClient", drop_client)?;
     cx.export_function("query", query)?;
+    cx.export_function("exec", exec)?;
+    cx.export_function("dml", dml)?;
+    cx.export_function("multiple_statements_ignore_err", multiple_statements_ignore_err)?;
     cx.export_function("set_auto_commit", set_auto_commit)?;
     cx.export_function("is_auto_commit", is_auto_commit)?;
     cx.export_function("set_fetch_size", set_fetch_size)?;
@@ -795,8 +1005,11 @@ register_module!(mut cx, {
     cx.export_function("prepare", prepare)?;
     cx.export_function("commit", commit)?;
     cx.export_function("rollback", rollback)?;
+
+    cx.export_function("add_row", add_row)?;
+    cx.export_function("execute_batch", execute_batch)?;
 //     cx.export_function("dropClient", drop_client)?;
-//.     cx.export_function("createClient", createClient)
+//     cx.export_function("createClient", createClient)
 
     Ok(())
 });
