@@ -1,5 +1,9 @@
 #[macro_use]
 extern crate neon;
+#[macro_use]
+extern crate neon_serde;
+#[macro_use]
+extern crate serde_derive;
 extern crate hdbconnect;
 extern crate chashmap;
 use hdbconnect::ResultSet;
@@ -49,19 +53,30 @@ macro_rules! check_res_undefined {
     )
 }
 
-fn create_client(mut cx: FunctionContext) -> JsResult<JsUndefined> {
 
-    let js_object = cx.argument::<JsObject>(0)?;
-    let host = js_object.get(&mut cx, "host")?.downcast::<JsString>().or_throw(&mut cx)?.value();
-    let port = js_object.get(&mut cx, "port")?.downcast::<JsNumber>().or_throw(&mut cx)?.value();
-    let user = js_object.get(&mut cx, "user")?.downcast::<JsString>().or_throw(&mut cx)?.value();
-    let password = js_object.get(&mut cx, "password")?.downcast::<JsString>().or_throw(&mut cx)?.value();
+#[derive(Serialize, Debug, Deserialize)]
+struct ConnectionParams {
+    host: String,
+    user: String,
+    password: String,
+    port: u32,
+}
+
+fn create_client(mut cx: FunctionContext) -> JsResult<JsUndefined> {
+    let arg0 = cx.argument::<JsValue>(0)?;
+    let params:ConnectionParams = neon_serde::from_value(&mut cx, arg0)?;
+
+    // let js_object = cx.argument::<JsObject>(0)?;
+    // let host = js_object.get(&mut cx, "host")?.downcast::<JsString>().or_throw(&mut cx)?.value();
+    // let port = js_object.get(&mut cx, "port")?.downcast::<JsNumber>().or_throw(&mut cx)?.value();
+    // let user = js_object.get(&mut cx, "user")?.downcast::<JsString>().or_throw(&mut cx)?.value();
+    // let password = js_object.get(&mut cx, "password")?.downcast::<JsString>().or_throw(&mut cx)?.value();
 
     let connect_params = ConnectParams::builder()
-        .hostname(host)
-        .port(port as u16)
-        .dbuser(user)
-        .password(password)
+        .hostname(params.host)
+        .port(params.port as u16)
+        .dbuser(params.user)
+        .password(params.password)
         .build()
         .unwrap();
 

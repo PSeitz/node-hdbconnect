@@ -3,7 +3,10 @@ let hdb = require('.');
 
 async function test() {
     try {
-        let connection = await hdb.createClient({"host": "172.31.217.8","port": 39015 ,"user": "SYSTEM","password": ""});
+        var fs = require("fs");
+        var connection_param = JSON.parse(fs.readFileSync("connection.json"));
+        console.log(connection_param)
+        let connection = await hdb.createClient(connection_param);
         await connection.multiple_statements_ignore_err(["DROP TABLE tab","CREATE COLUMN TABLE tab (C1 INT, C2 NVARCHAR (10))"]);
         let prep = await connection.prepare("INSERT INTO tab (C1,C2) values(?,?) ");
 

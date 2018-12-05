@@ -9,17 +9,18 @@ version = "0.1.0"
 neon-build = "0.2.0"
 
 [dependencies]
-# hdbconnect = "0.9.1"
-hdbconnect = { path = "../../rust-hdbconnect"}
+chashmap = "2.2.0"
 lazy_static = "1.2.0"
 nanoid = "0.2.0"
 neon = "0.2.0"
 neon-serde = "0.1.1"
 parking_lot = "0.6.4"
 serde = "1.0.80"
-serde_derive = "1.0.80"
-chashmap = "2.2.0"
 serde_db = "0.5.1"
+serde_derive = "1.0.80"
+
+[dependencies.hdbconnect]
+git = "https://github.com/pseitz/rust-hdbconnect"
 
 [lib]
 crate-type = ["dylib"]
