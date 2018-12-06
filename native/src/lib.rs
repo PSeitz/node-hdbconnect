@@ -216,18 +216,6 @@ fn set_application_source(mut cx:FunctionContext) -> JsResult<JsValue>{ //HdbRes
 // // Sets client information into a session variable on the server.
 // // connection.set_application_source("5.3.23","update_customer.rs")?;
 
-// fn statement(mut cx:FunctionContext) -> JsResult<JsValue>{ //HdbResult<HdbResponse>
-//     let client_id = cx.argument::<JsString>(0)?.value();
-//     let stmt = cx.argument::<JsString>(1)?.value();
-//     let res (*CONNECTIONS).get_mut(&client_id).unwrap() connection.statement(&stmt);
-//     let js_object = JsObject::new(&mut cx);
-//     if res.is_err() {
-//         let js_string = cx.string(format!("{:?}", res));
-//         js_object.set(&mut cx, "error", js_string).unwrap();
-//     }
-//     Ok(js_object.upcast())
-// }
-
 
 // fn convert_vec_to_array(mut cx: FunctionContext, data: Vec<Vec<String>>, header: Vec<String>) -> JsResult<JsArray> {
 
@@ -444,6 +432,39 @@ fn query(mut cx:FunctionContext) -> JsResult<JsUndefined>{ //HdbResult<ResultSet
     let query = cx.argument::<JsString>(1)?.value();
     let f = cx.argument::<JsFunction>(2)?;
     QueryTask{conn_id, query}.schedule(f);
+    Ok(cx.undefined())
+}
+
+
+struct StatementTask{
+    statement:String,
+    conn_id: String,
+}
+
+impl Task for StatementTask {
+    type Output = HdbResponse; // the result
+    type Error = HdbError;
+    type JsEvent = JsValue;
+
+    fn perform(&self) -> Result<Self::Output, Self::Error> {
+        let res:HdbResult<HdbResponse> = (*CONNECTIONS).get_mut(&self.conn_id).unwrap().statement(&self.statement);
+        Ok(res?)
+    }
+
+    fn complete(self, mut cx: TaskContext, res: Result<Self::Output, Self::Error>) -> JsResult<Self::JsEvent> {
+        match res {
+            Ok(res) => convert_hdbresponse(&mut cx, res),
+            Err(res) => cx.throw_error(&format!("{:?}", res)),
+        }
+    }
+}
+
+// // This generic method can handle all kinds of calls, and thus has the most complex return type. In many cases it will be more appropriate to use one of the methods query(), dml(), exec(), which have the adequate simple result type you usually want.
+fn statement(mut cx:FunctionContext) -> JsResult<JsUndefined>{ //HdbResult<ResultSet>
+    let conn_id = cx.argument::<JsString>(0)?.value();
+    let statement = cx.argument::<JsString>(1)?.value();
+    let f = cx.argument::<JsFunction>(2)?;
+    StatementTask{conn_id, statement}.schedule(f);
     Ok(cx.undefined())
 }
 
@@ -740,6 +761,7 @@ fn add_row(mut cx:FunctionContext) -> JsResult<JsValue>{ //HdbResult<()>
             ParameterRow::new(data)
         };
         let res = prep.add_row(data);
+
         check_res_undefined!(res, cx);
     }
 
@@ -772,6 +794,48 @@ fn add_row(mut cx:FunctionContext) -> JsResult<JsValue>{ //HdbResult<()>
 }
 
 
+fn convert_hdbresponse<'a>(cx: &mut TaskContext<'a>, res: HdbResponse) -> JsResult<'a, JsValue> {
+    if res.count() == 1{
+        let mut data = res.data;
+        let mut el = data.remove(0);
+        match el {
+            HdbReturnValue::ResultSet(rs) => {
+                return Ok(convert_rs(cx, rs).unwrap().upcast());
+            },
+            HdbReturnValue::AffectedRows(data) => {
+
+                let js_array = JsArray::new(cx, data.len() as u32);
+                for (i, num) in data.iter().enumerate() {
+                    let num = cx.number(*num as f64);
+                    let _  = js_array.set(cx, i as u32, num);
+                }
+
+                return Ok(js_array.upcast());
+            },
+            HdbReturnValue::OutputParameters(out) => {
+                // unimplemented!()
+                return cx.throw_error("OutputParameters not implemented");
+                // return Ok(cx.string("outputs").upcast());
+            },
+            HdbReturnValue::Success => {
+                return Ok(cx.string("success").upcast());
+            },
+            HdbReturnValue::XaTransactionIds(trans_id) => {
+                // unimplemented!()
+                // return Ok(cx.string("someids").upcast());
+                return cx.throw_error("XaTransactionIds not implemented");
+            },
+            
+        }
+        
+    }else{
+        unimplemented!()
+        // let data = res.get_data();
+        // for el in data {
+        // }
+    }
+}
+
 struct ExecPreparedStatementTask{
     prepared_statement_id: String,
 }
@@ -790,45 +854,7 @@ impl Task for ExecPreparedStatementTask {
     fn complete(self, mut cx: TaskContext, res: Result<Self::Output, Self::Error>) -> JsResult<Self::JsEvent> {
         match res {
             Ok(res) => {
-                if res.count() == 1{
-                    let mut data = res.data;
-                    let mut el = data.remove(0);
-                    match el {
-                        HdbReturnValue::ResultSet(rs) => {
-                            return Ok(convert_rs(&mut cx, rs).unwrap().upcast());
-                        },
-                        HdbReturnValue::AffectedRows(data) => {
-
-                            let js_array = JsArray::new(&mut cx, data.len() as u32);
-                            for (i, num) in data.iter().enumerate() {
-                                let num = cx.number(*num as f64);
-                                let _  = js_array.set(&mut cx, i as u32, num);
-                            }
-
-                            return Ok(js_array.upcast());
-                        },
-                        HdbReturnValue::OutputParameters(out) => {
-                            // unimplemented!()
-                            return cx.throw_error("OutputParameters not implemented");
-                            // return Ok(cx.string("outputs").upcast());
-                        },
-                        HdbReturnValue::Success => {
-                            return Ok(cx.string("success").upcast());
-                        },
-                        HdbReturnValue::XaTransactionIds(trans_id) => {
-                            // unimplemented!()
-                            // return Ok(cx.string("someids").upcast());
-                            return cx.throw_error("XaTransactionIds not implemented");
-                        },
-                        
-                    }
-                    
-                }else{
-                    unimplemented!()
-                    // let data = res.get_data();
-                    // for el in data {
-                    // }
-                }
+                convert_hdbresponse(&mut cx, res)
             },
             Err(res) => cx.throw_error(&format!("{:?}", res)),
         }
@@ -870,7 +896,6 @@ fn js_to_hdb_value<'a>(_cx: &mut FunctionContext<'a>, v: Handle<JsValue>, desc: 
 
 
 // get_server_resource_consumption_info
-// statement
 // spawn
 // multiple_statements
 // pop_warnings
@@ -881,6 +906,7 @@ register_module!(mut cx, {
     cx.export_function("createClient", create_client)?;
     cx.export_function("dropClient", drop_client)?;
     cx.export_function("query", query)?;
+    cx.export_function("statement", statement)?;
     cx.export_function("exec", exec)?;
     cx.export_function("dml", dml)?;
     cx.export_function("multiple_statements_ignore_err", multiple_statements_ignore_err)?;
