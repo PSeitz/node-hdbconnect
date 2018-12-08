@@ -88,6 +88,50 @@ test('statement can handle everything', async () => {
 });
 
 
+// DATE, TIME, SECONDDATE, TIMESTAMP
+// TINYINT, SMALLINT, INTEGER, BIGINT, SMALLDECIMAL, DECIMAL, REAL, DOUBLE
+// BOOLEAN
+// VARCHAR, NVARCHAR, ALPHANUM, SHORTTEXT
+// VARBINARY
+// BLOB, CLOB, NCLOB, TEXT
+// ARRAY
+// ST_GEOMETRY, ST_POINT
+
+
+test('test lob data types', async () => {
+    await connection.multiple_statements_ignore_err(["DROP TABLE lob_types","CREATE COLUMN TABLE lob_types (col_blob BLOB, col_clob CLOB, col_nclob NCLOB, col_text TEXT)"]);
+
+    const arr = new Uint16Array(2);
+    arr[0] = 5000;
+    arr[1] = 4000;
+    // Shares memory with `arr`
+    const buf = Buffer.from(arr.buffer);
+
+    let prep = await connection.prepare("INSERT INTO lob_types (col_blob, col_clob, col_nclob, col_text) values(?,?,?,?) ");
+    prep.add_batch([buf, "test", "test", "nice"]);
+    // prep.add_batch([11, undefined]);
+    // prep.add_batch([undefined, undefined]);
+    let batch_res = await prep.execute_batch();
+
+    var res = await connection.statement("SELECT COUNT(*) FROM lob_types");
+    expect(res).toEqual([{"COUNT(*)": 1}]);
+    // var res = await connection.statement("SELECT * FROM lob_types");
+    // console.log(res)
+    // var res = await connection.statement("SELECT ID FROM lob_types WHERE NAME = 'nice'");
+    // expect(res).toEqual([{"ID":10}]);
+    // var res = await connection.dml(`UPDATE lob_types
+    //     SET ID = '12'
+    //     WHERE NAME = 'nice';`);
+
+    // var res = await connection.statement("SELECT ID FROM lob_types WHERE NAME = 'nice'");
+    // expect(res).toEqual([{"ID":12}]);
+
+    // await connection.exec("DROP TABLE lob_types");
+
+    // await expect(connection.statement("SELECT ID FROM lob_types WHERE NAME = 'nice'")).rejects.toEqual(new Error('DbError(error [code: 259, sql state: HY000] at position 15: "invalid table name:  Could not find table/view TAB in schema SYSTEM: line 1 col 16 (at pos 15)")'));
+});
+
+
 // let hdb = require('.');
 
 // async function test() {
