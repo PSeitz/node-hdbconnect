@@ -26,6 +26,7 @@ serde_derive = "1.0.80"
 # git = "https://github.com/emabee/rust-hdbconnect"
 git = "https://github.com/pseitz/rust-hdbconnect"
 # path = "../../rust-hdbconnect"
+features = ["tls"]
 
 [lib]
 crate-type = ["dylib"]

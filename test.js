@@ -23,14 +23,6 @@ afterAll(async () => {
 
 
 
-// test('adds 1 + 2 to equal 3', async () => {
-//     await connection.multiple_statements_ignore_err(["DROP TABLE tab","CREATE COLUMN TABLE tab (C1 INT, C2 NVARCHAR (10))"]);
-
-//     expect(1+2).toBe(3);
-// });
-
-
-
 test('insert ', async () => {
     await connection.multiple_statements_ignore_err(["DROP TABLE tab","CREATE COLUMN TABLE tab (ID INT, NAME NVARCHAR (10))"]);
 
@@ -40,7 +32,7 @@ test('insert ', async () => {
     prep.add_batch([undefined, undefined]);
 
     let batch_res = await prep.execute_batch();
-
+    prep.drop();
 
     var res = await connection.query("SELECT COUNT(*) FROM tab");
     expect(res).toEqual([{"COUNT(*)": 3}]);
@@ -63,11 +55,9 @@ test('insert ', async () => {
 test('statement can handle everything', async () => {
     await connection.multiple_statements_ignore_err(["DROP TABLE tab","CREATE COLUMN TABLE tab (ID INT, NAME NVARCHAR (10))"]);
 
-    let prep = await connection.prepare("INSERT INTO tab (ID,NAME) values(?,?) ");
-    prep.add_batch([10, "nice"]);
-    prep.add_batch([11, undefined]);
-    prep.add_batch([undefined, undefined]);
-    let batch_res = await prep.execute_batch();
+    await connection.statement("INSERT INTO tab (ID,NAME) values(10,'nice') ");
+    await connection.statement("INSERT INTO tab (ID,NAME) values(11,NULL) ");
+    await connection.statement("INSERT INTO tab (ID,NAME) values(NULL,NULL) ");
 
     var res = await connection.statement("SELECT COUNT(*) FROM tab");
     expect(res).toEqual([{"COUNT(*)": 3}]);
@@ -104,24 +94,20 @@ test('test lob data types', async () => {
     const arr = new Uint16Array(2);
     arr[0] = 5000;
     arr[1] = 4000;
-    // Shares memory with `arr`
     const buf = Buffer.from(arr.buffer);
 
     await connection.statement("INSERT INTO lob_types (col_nclob) values('oge') ");
     let prep = await connection.prepare("INSERT INTO lob_types (col_blob, col_clob, col_nclob, col_text) values(?,?,?,?) ");
     prep.add_batch([buf, "test", "test", "nice"]);
-    // prep.add_batch([11, undefined]);
-    // prep.add_batch([undefined, undefined]);
+
     let batch_res = await prep.execute_batch();
+    prep.drop();
 
     var res = await connection.statement("SELECT COUNT(*) FROM lob_types");
     expect(res).toEqual([{"COUNT(*)": 2}]);
-    var res = await connection.statement("SELECT col_nclob FROM lob_types");
-    console.log(res)
-    var res = await connection.statement("SELECT col_blob FROM lob_types");
-    console.log(res)
-    var res = await connection.statement("SELECT col_text FROM lob_types");
-    console.log(res)
+    expect(await connection.statement("SELECT col_blob FROM lob_types")).toEqual([ { COL_BLOB: null }, { COL_BLOB: buf } ]);
+    expect(await connection.statement("SELECT col_nclob FROM lob_types")).toEqual([ { COL_NCLOB: 'oge' }, { COL_NCLOB: 'test' } ]);
+    expect(await connection.statement("SELECT col_text FROM lob_types")).toEqual( [ { COL_TEXT: null }, { COL_TEXT: 'nice' } ]);
     // var res = await connection.statement("SELECT * FROM lob_types");
     // console.log(res)
     // var res = await connection.statement("SELECT ID FROM lob_types WHERE NAME = 'nice'");

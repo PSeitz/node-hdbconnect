@@ -6,7 +6,7 @@ extern crate neon_serde;
 extern crate serde_derive;
 extern crate hdbconnect;
 extern crate chashmap;
-use hdbconnect::ResultSet;
+
 use neon::prelude::*;
 use chashmap::CHashMap;
 use std::io::{self, Read};
@@ -19,7 +19,13 @@ extern crate serde_bytes;
 
 // use std::collections::HashMap;
 // use std::sync::Mutex;
+
+use serde_db::ser::to_params;
+use serde_db::ser::SerializationError;
+
 use hdbconnect::{Connection, HdbResult, HdbError, HdbValue, HdbResponse, PreparedStatement, HdbReturnValue, ParameterDescriptor, IntoConnectParams};
+use hdbconnect::ResultSet;
+use hdbconnect::ServerCerts;
 use hdbconnect::ConnectParams;
 // use parking_lot::RwLock;
 use parking_lot::Mutex;
@@ -62,19 +68,22 @@ struct ConnectionParams {
     user: String,
     password: String,
     port: u32,
+    tls: Option<String>
 }
 
 fn create_client(mut cx: FunctionContext) -> JsResult<JsUndefined> {
     let arg0 = cx.argument::<JsValue>(0)?;
     let params:ConnectionParams = neon_serde::from_value(&mut cx, arg0)?;
 
-    let connect_params = ConnectParams::builder()
-        .hostname(params.host)
+    let mut builder = ConnectParams::builder();
+    builder.hostname(params.host)
         .port(params.port as u16)
         .dbuser(params.user)
-        .password(params.password)
-        .build()
-        .unwrap();
+        .password(params.password);
+    if let Some(cert) = &params.tls {
+        builder.tls_with(ServerCerts::Direct(cert.to_string()));
+    }
+    let connect_params  = builder.build().unwrap();
 
     println!("{:?}", connect_params);
     let f = cx.argument::<JsFunction>(1)?;
@@ -600,9 +609,6 @@ fn multiple_statements_ignore_err(mut cx:FunctionContext) -> JsResult<JsUndefine
 }
 
 
-
-use serde_db::ser::to_params;
-use serde_db::ser::SerializationError;
 
 // Commits the current transaction.
 fn add_row(mut cx:FunctionContext) -> JsResult<JsValue>{ //HdbResult<()>
