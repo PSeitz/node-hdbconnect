@@ -107,6 +107,7 @@ test('test lob data types', async () => {
     // Shares memory with `arr`
     const buf = Buffer.from(arr.buffer);
 
+    await connection.statement("INSERT INTO lob_types (col_nclob) values('oge') ");
     let prep = await connection.prepare("INSERT INTO lob_types (col_blob, col_clob, col_nclob, col_text) values(?,?,?,?) ");
     prep.add_batch([buf, "test", "test", "nice"]);
     // prep.add_batch([11, undefined]);
@@ -114,7 +115,13 @@ test('test lob data types', async () => {
     let batch_res = await prep.execute_batch();
 
     var res = await connection.statement("SELECT COUNT(*) FROM lob_types");
-    expect(res).toEqual([{"COUNT(*)": 1}]);
+    expect(res).toEqual([{"COUNT(*)": 2}]);
+    var res = await connection.statement("SELECT col_nclob FROM lob_types");
+    console.log(res)
+    var res = await connection.statement("SELECT col_blob FROM lob_types");
+    console.log(res)
+    var res = await connection.statement("SELECT col_text FROM lob_types");
+    console.log(res)
     // var res = await connection.statement("SELECT * FROM lob_types");
     // console.log(res)
     // var res = await connection.statement("SELECT ID FROM lob_types WHERE NAME = 'nice'");

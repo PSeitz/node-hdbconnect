@@ -9,6 +9,7 @@ extern crate chashmap;
 use hdbconnect::ResultSet;
 use neon::prelude::*;
 use chashmap::CHashMap;
+use std::io::{self, Read};
 
 #[macro_use]
 extern crate lazy_static;
@@ -198,32 +199,15 @@ fn set_application_source(mut cx:FunctionContext) -> JsResult<JsValue>{ //HdbRes
     check_res_undefined!(res, cx);
 }
 
-
-// fn convert_vec_to_array(mut cx: FunctionContext, data: Vec<Vec<String>>, header: Vec<String>) -> JsResult<JsArray> {
-
-//     // Create the JS array
-//     let js_array = JsArray::new(&mut cx, data.len() as u32);
-
-//     // Iterate over the rust Vec and map each value in the Vec to the JS array
-//     for (i, row) in data.iter().enumerate() {
-//         let js_object = JsObject::new(&mut cx);
-//         for (j, col) in row.iter().enumerate() {
-//             let col_name = cx.string(&header[j]);
-//             let col_val = cx.string(col);
-//             js_object.set(&mut cx, col_name, col_val).unwrap();
-//         }
-//         // let js_string = cx.string(obj);
-//         let _  = js_array.set(&mut cx, i as u32, js_object);
-//     }
-
-//     Ok(js_array)
-// }
-
-
 macro_rules! try_cast_number {
     ($cx:ident, $val:ident, $cast_into:ty) => {
+        try_cast!($cx, $val, $cast_into, (|val| $cx.number(val as f64).upcast()))
+    }
+}
+macro_rules! try_cast {
+    ($cx:ident, $val:ident, $cast_into:ty, $on_success:expr) => {
         if let Some(val) = $val.into_typed::<$cast_into>().unwrap() {
-            return Ok($cx.number(val as f64).upcast())
+            return Ok($on_success(val))
         }else{
             return Ok($cx.null().upcast());
         }
@@ -261,6 +245,9 @@ macro_rules! buffer {
 }
 
 fn hdb_value_to_js<'a>(cx: &mut TaskContext<'a>, val: HdbValue) -> JsResult<'a, JsValue> {
+    if val.is_null() {
+        return Ok(cx.null().upcast());
+    }
     use serde_db::de::DbValue;
     match val {
         HdbValue::NOTHING => {
@@ -290,7 +277,12 @@ fn hdb_value_to_js<'a>(cx: &mut TaskContext<'a>, val: HdbValue) -> JsResult<'a, 
             });
             return Ok(dat.upcast())
         }
-        HdbValue::CLOB(_) | HdbValue::NCLOB(_) | HdbValue::BLOB(_) => {
+         HdbValue::BLOB(_) => {
+            let val = val.try_into::<serde_bytes::ByteBuf>().unwrap();
+            let val: &[u8] = val.as_ref();
+            buffer!(cx, val);
+        }
+        HdbValue::CLOB(_)  => {
             let val = val.into_typed::<Vec<u8>>().unwrap();
             buffer!(cx, val);
         }
@@ -307,12 +299,13 @@ fn hdb_value_to_js<'a>(cx: &mut TaskContext<'a>, val: HdbValue) -> JsResult<'a, 
         | HdbValue::N_SMALLINT(_)
         | HdbValue::N_INT(_)
         | HdbValue::N_BIGINT(_) => {
-            try_cast_number!(cx, val, Option<isize>);
+            try_cast!(cx, val, Option<isize>, (|val| cx.number(val as f64).upcast()))
+            // try_cast_number!(cx, val, Option<isize>);
         }
         | HdbValue::N_DECIMAL(_)
         | HdbValue::N_REAL(_)
         | HdbValue::N_DOUBLE(_) => {
-            try_cast_number!(cx, val, Option<f64>);
+            try_cast!(cx, val, Option<f64>, (|val| cx.number(val as f64).upcast()))
         }
         HdbValue::N_CHAR(_)
         | HdbValue::N_VARCHAR(_)
@@ -322,26 +315,28 @@ fn hdb_value_to_js<'a>(cx: &mut TaskContext<'a>, val: HdbValue) -> JsResult<'a, 
         }
         HdbValue::N_BINARY(el) | HdbValue::N_VARBINARY(el) | HdbValue::N_BSTRING(el) => {
             if let Some(el) = el {
-                let mut dat = cx.buffer(el.len() as u32).unwrap();
-                cx.borrow_mut(&mut dat, |data| {
-                    let slice = data.as_mut_slice::<u8>();
-                    slice.clone_from_slice(&el);
-                });
-                return Ok(dat.upcast());
+                buffer!(cx, el);
             }
             return Ok(cx.null().upcast());
         }
         HdbValue::N_CLOB(_)  => {
-            // return Ok(cx.undefined().upcast());
             try_cast_buffer!(cx, val, Option<Vec<u8>>);
         }
         HdbValue::N_NCLOB(_) => {
-            return Ok(cx.undefined().upcast());
-            // try_cast_buffer!(cx, val, Option<Vec<u8>>);
+            try_cast_string!(cx, val, Option<String>);
         }
+        HdbValue::NCLOB(_) => {
+            let val = val.into_typed::<String>().unwrap();
+            return Ok(cx.string(val).upcast());
+        }
+        // HdbValue::N_BLOB(Some(mut blob)) => {
         HdbValue::N_BLOB(_) => {
-            return Ok(cx.undefined().upcast());
-            // try_cast_buffer!(cx, val, Option<Vec<u8>>);
+            if let Some(val) = val.try_into::<Option<serde_bytes::ByteBuf>>().unwrap() {
+                let val: &[u8] = val.as_ref();
+                buffer!(cx, val);
+            }else{
+                return Ok(cx.null().upcast());
+            }
         }
         HdbValue::N_BOOLEAN(el) => {
             if let Some(el) = el {
@@ -544,7 +539,7 @@ impl Task for PrepareStatementTask {
     }
 }
 
-// Executes a statement and expects a plain success.
+// Prepares a statement and returns a handle to it.
 fn prepare(mut cx:FunctionContext) -> JsResult<JsUndefined>{ //HdbResult<PreparedStatement>
     let conn_id = cx.argument::<JsString>(0)?.value();
     let stmt = cx.argument::<JsString>(1)?.value();
@@ -555,44 +550,20 @@ fn prepare(mut cx:FunctionContext) -> JsResult<JsUndefined>{ //HdbResult<Prepare
     Ok(cx.undefined())
 }
 
-// // Prepares a statement and returns a handle to it.
 
-
+/// Commits the current transaction.
 fn commit(mut cx:FunctionContext) -> JsResult<JsValue>{ //HdbResult<()>
     let client_id = cx.argument::<JsString>(0)?.value();
     let res = (*CONNECTIONS).get_mut(&client_id).unwrap().commit();
     check_res_undefined!(res, cx);
 }
 
-
-// Commits the current transaction.
+/// Rolls back the current transaction.
 fn rollback(mut cx:FunctionContext) -> JsResult<JsValue>{ //HdbResult<()>
     let client_id = cx.argument::<JsString>(0)?.value();
     let res = (*CONNECTIONS).get_mut(&client_id).unwrap().rollback();
     check_res_undefined!(res, cx);
 }
-
-// // Rolls back the current transaction.
-// fn spawn(mut cx:FunctionContext) -> JsResult<JsValue>{ //HdbResult<Connection>
-//     let client_id = cx.argument::<JsString>(0)?.value();
-//     let connection = (*CONNECTIONS).get(&client_id).unwrap();
-//     let res = connection.spawn();
-//     let js_object = JsObject::new(&mut cx);
-//     match res {
-//         Ok(res) => {
-//             let _res: Vec<Vec<String>> = res.try_into().unwrap();
-//             let js_object = JsObject::new(&mut cx);
-//             return Ok(js_object.upcast())
-//         },
-//         Err(err) => {
-//             let js_object = JsObject::new(&mut cx);
-//             let js_string = cx.string(format!("{:?}", err));
-//             js_object.set(&mut cx, "error", js_string).unwrap();
-//             return Ok(js_object.upcast())
-//         },
-//     }
-// }
-
 
 struct MultipleStatementsIgnoreErr{
     queries:Vec<String>,
@@ -629,88 +600,6 @@ fn multiple_statements_ignore_err(mut cx:FunctionContext) -> JsResult<JsUndefine
 }
 
 
-// // Utility method to fire a couple of statements, ignoring errors and return values
-// fn multiple_statements<mut cx:FunctionContext, S: AsRef<str>>({
-//     let client_id = cx.argument::<JsString>(0)?.value();
-//     let connection = (*CONNECTIONS).get(&client_id).unwrap();
-//     let res = connection.multiple_statements();
-//     let js_object = JsObject::new(&mut cx);
-//     match res {
-//         Ok(res) => {
-//             let _res: Vec<Vec<String>> = res.try_into().unwrap();
-//             let js_object = JsObject::new(&mut cx);
-//             return Ok(js_object.upcast())
-//         },
-//         Err(err) => {
-//             let js_object = JsObject::new(&mut cx);
-//             let js_string = cx.string(format!("{:?}", err));
-//             js_object.set(&mut cx, "error", js_string).unwrap();
-//             return Ok(js_object.upcast())
-//         },
-//     }
-// }
-// //     &mut self,
-// //     stmts: Vec<S>
-// // ) -> HdbResult<()>
-
-// // Utility method to fire a couple of statements, ignoring their return values; the method returns with the first error, or with ()
-// fn pop_warnings(mut cx:FunctionContext) -> HdbResult<Option<Vec<ServerError>>>{
-//     let client_id = cx.argument::<JsString>(0)?.value();
-//     let connection = (*CONNECTIONS).get(&client_id).unwrap();
-//     let res = connection.pop_warnings();
-//     let js_object = JsObject::new(&mut cx);
-//     match res {
-//         Ok(res) => {
-//             let _res: Vec<Vec<String>> = res.try_into().unwrap();
-//             let js_object = JsObject::new(&mut cx);
-//             return Ok(js_object.upcast())
-//         },
-//         Err(err) => {
-//             let js_object = JsObject::new(&mut cx);
-//             let js_string = cx.string(format!("{:?}", err));
-//             js_object.set(&mut cx, "error", js_string).unwrap();
-//             return Ok(js_object.upcast())
-//         },
-//     }
-// }
-
-// // Returns warnings that were returned from the server since the last call to this method.
-// fn get_resource_manager(mut cx:FunctionContext) -> Box<dyn ResourceManager>{
-//     let client_id = cx.argument::<JsString>(0)?.value();
-//     let connection = (*HASHMAP).get(&client_id).unwrap();
-//.     let res = connection.get_resource_manager();
-//     let js_object = JsObject::new(&mut cx);
-//.    match res {
-//         Ok(res) => {
-//             let _res: Vec<Vec<String>> = res.try_into().unwrap();
-//             let js_object = JsObject::new(&mut cx);
-//             return Ok(js_object.upcast())
-//         },
-//         Err(err) => {
-//             let js_object = JsObject::new(&mut cx);
-//             let js_string = cx.string(format!("{:?}", err));
-//             js_object.set(&mut cx, "error", js_string).unwrap();
-//             return Ok(js_object.upcast())
-//         },
-//     }
-// }
-
-// // Returns an implementation of dist_tx::rm::ResourceManager that is based on this connection.
-// fn execute_with_debuginfo(
-
-
-// #[derive(Serialize)]
-// #[serde(untagged)]
-// enum Data {
-//     IntegerU64(u64),
-//     IntegerF64(f64),
-//     String(String),
-//     Bytes(Vec<u8>),
-//     OIntegerU64(Option<u64>),
-//     OIntegerF64(Option<f64>),
-//     OString(Option<String>),
-//     OBytes(Option<Vec<u8>>),
-// }
 
 use serde_db::ser::to_params;
 use serde_db::ser::SerializationError;
@@ -722,10 +611,6 @@ fn add_row(mut cx:FunctionContext) -> JsResult<JsValue>{ //HdbResult<()>
     let data = cx.argument::<JsArray>(1)?;
 
     let vec: Vec<Handle<JsValue>> = data.to_vec(&mut cx)?;
-
-    // let meta_slice = &metadata[vec.len().. vec.len() + 1];
-    // let val = to_params(val, meta_slice)?.pop().unwrap();
-    // vec.last_mut().map(|row|&mut row.values).unwrap().push(val);
 
     let mut prepo = (*PREPARED_STATEMENTS).get_mut(&prepared_statement_id);
     let mut prep = prepo.as_mut().unwrap().lock();
@@ -739,36 +624,11 @@ fn add_row(mut cx:FunctionContext) -> JsResult<JsValue>{ //HdbResult<()>
             // ParameterRow::new(data)
             data
         };
-        let res = prep.add_batch(&data);
+        let res = prep.add_row_to_batch(data);
         check_res_undefined!(res, cx);
     }
 
-    // if let Some(params_desc) = prep.input_parameter_descriptors() {
-
-    //     let data:Vec<HdbValue> = vec.into_iter().enumerate().map(|(i, val)| {
-    //         js_to_hdb_value(&mut cx, val, params_desc[i].clone())
-    //     }).collect();
-    //     let data = ParameterRow::new(data);
-    //     let res = prep.add_row(data);
-    //     // for (i, val) in vec.iter().enumerate() {
-
-    //     // }
-
-
-    // }
-
     return Ok(cx.undefined().upcast())
-    // let data:Vec<HdbValue> = vec.into_iter().map(|el|js_to_hdb_value(&mut cx, el)).collect();
-    // println!("{:?}", data);
-    // let data = ParameterRow::new(data);
-    // // let v: Handle<JsValue> = cx.number(17).upcast();
-    // // v.is_a::<JsString>(); // false
-    // // v.is_a::<JsNumber>(); // true
-    // // v.is_a::<JsValue>();  // true
-
-    // // let res = prep.add_batch(&[1]); // TODO
-    // let res = prep.add_row(data); // TODO
-    // check_res_undefined!(res, cx);
 }
 
 
@@ -791,7 +651,6 @@ fn convert_hdbresponse<'a>(cx: &mut TaskContext<'a>, res: HdbResponse) -> JsResu
                 return Ok(js_array.upcast());
             },
             HdbReturnValue::OutputParameters(_out) => {
-                // unimplemented!()
                 return cx.throw_error("OutputParameters not implemented");
                 // return Ok(cx.string("outputs").upcast());
             },
@@ -799,7 +658,6 @@ fn convert_hdbresponse<'a>(cx: &mut TaskContext<'a>, res: HdbResponse) -> JsResu
                 return Ok(cx.string("success").upcast());
             },
             HdbReturnValue::XaTransactionIds(_trans_id) => {
-                // unimplemented!()
                 // return Ok(cx.string("someids").upcast());
                 return cx.throw_error("XaTransactionIds not implemented");
             },
@@ -904,13 +762,12 @@ fn js_to_hdb_value<'a>(cx: &mut FunctionContext<'a>, v: Handle<JsValue>, desc: P
 
 }
 
-
 // get_server_resource_consumption_info
 // spawn
 // multiple_statements
 // pop_warnings
 // get_resource_manager
-
+// execute_with_debuginfo
 
 register_module!(mut cx, {
     cx.export_function("createClient", create_client)?;

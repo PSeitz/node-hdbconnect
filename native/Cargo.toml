@@ -18,11 +18,13 @@ parking_lot = "0.6.4"
 serde = "1.0.80"
 serde_bytes = "0.10.4"
 serde_db = "0.5.1"
+# serde_db = { path = "../../rust-serde_db" }
 serde_derive = "1.0.80"
 
 [dependencies.hdbconnect]
-version = "0.10.0"
-# git = "https://github.com/pseitz/rust-hdbconnect"
+# version = "0.10.0"
+# git = "https://github.com/emabee/rust-hdbconnect"
+git = "https://github.com/pseitz/rust-hdbconnect"
 # path = "../../rust-hdbconnect"
 
 [lib]

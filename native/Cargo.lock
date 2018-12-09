@@ -219,8 +219,8 @@ dependencies = [
 
 [[package]]
 name = "hdbconnect"
-version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
+version = "0.9.1"
+source = "git+https://github.com/pseitz/rust-hdbconnect#53962856dbf7a0fb58758bf96102a19b6f044fe3"
 dependencies = [
  "bigdecimal 0.0.14 (registry+https://github.com/rust-lang/crates.io-index)",
  "blake2 0.8.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -367,7 +367,7 @@ name = "node-hdbconnect"
 version = "0.1.0"
 dependencies = [
  "chashmap 2.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "hdbconnect 0.10.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "hdbconnect 0.9.1 (git+https://github.com/pseitz/rust-hdbconnect)",
  "lazy_static 1.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "nanoid 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "neon 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -897,7 +897,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 "checksum fuchsia-zircon-sys 0.3.3 (registry+https://github.com/rust-lang/crates.io-index)" = "3dcaa9ae7725d12cdb85b3ad99a434db70b468c09ded17e012d86b5c1010f7a7"
 "checksum gcc 0.3.55 (registry+https://github.com/rust-lang/crates.io-index)" = "8f5f3913fa0bfe7ee1fd8248b6b9f42a5af4b9d65ec2dd2c3c26132b950ecfc2"
 "checksum generic-array 0.12.0 (registry+https://github.com/rust-lang/crates.io-index)" = "3c0f28c2f5bfb5960175af447a2da7c18900693738343dc896ffbcabd9839592"
-"checksum hdbconnect 0.10.0 (registry+https://github.com/rust-lang/crates.io-index)" = "9a16f6b3a86e2542e156d6e87970f0f8061b98a11614f411af057c79e51a2f14"
+"checksum hdbconnect 0.9.1 (git+https://github.com/pseitz/rust-hdbconnect)" = "<none>"
 "checksum hex 0.3.2 (registry+https://github.com/rust-lang/crates.io-index)" = "805026a5d0141ffc30abb3be3173848ad46a1b1664fe632428479619a3644d77"
 "checksum hmac 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)" = "f127a908633569f208325f86f71255d3363c79721d7f9fe31cd5569908819771"
 "checksum idna 0.1.5 (registry+https://github.com/rust-lang/crates.io-index)" = "38f09e0f0b1fb55fdee1f17470ad800da77af5186a1a76c026b679358b7e844e"
