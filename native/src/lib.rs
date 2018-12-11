@@ -1,6 +1,5 @@
 #[macro_use]
 extern crate neon;
-#[macro_use]
 extern crate neon_serde;
 #[macro_use]
 extern crate serde_derive;
@@ -9,7 +8,6 @@ extern crate chashmap;
 
 use neon::prelude::*;
 use chashmap::CHashMap;
-use std::io::{self, Read};
 
 #[macro_use]
 extern crate lazy_static;
@@ -17,13 +15,10 @@ extern crate parking_lot;
 extern crate serde_db;
 extern crate serde_bytes;
 
-// use std::collections::HashMap;
-// use std::sync::Mutex;
-
 use serde_db::ser::to_params;
-use serde_db::ser::SerializationError;
+// use serde_db::ser::SerializationError;
 
-use hdbconnect::{Connection, HdbResult, HdbError, HdbValue, HdbResponse, PreparedStatement, HdbReturnValue, ParameterDescriptor, IntoConnectParams};
+use hdbconnect::{Connection, HdbResult, HdbError, HdbValue, HdbResponse, PreparedStatement, HdbReturnValue, ParameterDescriptor};
 use hdbconnect::ResultSet;
 use hdbconnect::ServerCerts;
 use hdbconnect::ConnectParams;
@@ -61,7 +56,6 @@ macro_rules! check_res_undefined {
     )
 }
 
-
 #[derive(Serialize, Debug, Deserialize)]
 struct ConnectionParams {
     host: String,
@@ -85,7 +79,6 @@ fn create_client(mut cx: FunctionContext) -> JsResult<JsUndefined> {
     }
     let connect_params  = builder.build().unwrap();
 
-    println!("{:?}", connect_params);
     let f = cx.argument::<JsFunction>(1)?;
     ConnectTask(connect_params).schedule(f);
     Ok(cx.undefined())
@@ -208,11 +201,6 @@ fn set_application_source(mut cx:FunctionContext) -> JsResult<JsValue>{ //HdbRes
     check_res_undefined!(res, cx);
 }
 
-macro_rules! try_cast_number {
-    ($cx:ident, $val:ident, $cast_into:ty) => {
-        try_cast!($cx, $val, $cast_into, (|val| $cx.number(val as f64).upcast()))
-    }
-}
 macro_rules! try_cast {
     ($cx:ident, $val:ident, $cast_into:ty, $on_success:expr) => {
         if let Some(val) = $val.into_typed::<$cast_into>().unwrap() {
@@ -309,7 +297,6 @@ fn hdb_value_to_js<'a>(cx: &mut TaskContext<'a>, val: HdbValue) -> JsResult<'a, 
         | HdbValue::N_INT(_)
         | HdbValue::N_BIGINT(_) => {
             try_cast!(cx, val, Option<isize>, (|val| cx.number(val as f64).upcast()))
-            // try_cast_number!(cx, val, Option<isize>);
         }
         | HdbValue::N_DECIMAL(_)
         | HdbValue::N_REAL(_)
@@ -627,7 +614,6 @@ fn add_row(mut cx:FunctionContext) -> JsResult<JsValue>{ //HdbResult<()>
             let data:Vec<HdbValue> = vec.into_iter().enumerate().map(|(i, val)| {
                 js_to_hdb_value(&mut cx, val, params_desc[i].clone())
             }).collect();
-            // ParameterRow::new(data)
             data
         };
         let res = prep.add_row_to_batch(data);
@@ -638,41 +624,46 @@ fn add_row(mut cx:FunctionContext) -> JsResult<JsValue>{ //HdbResult<()>
 }
 
 
+fn convert_hdbreturn_value<'a>(cx: &mut TaskContext<'a>, el: HdbReturnValue) -> JsResult<'a, JsValue> {
+    match el {
+        HdbReturnValue::ResultSet(rs) => {
+            return Ok(convert_rs(cx, rs).unwrap().upcast());
+        },
+        HdbReturnValue::AffectedRows(data) => {
+            let js_array = JsArray::new(cx, data.len() as u32);
+            for (i, num) in data.iter().enumerate() {
+                let num = cx.number(*num as f64);
+                let _  = js_array.set(cx, i as u32, num);
+            }
+            return Ok(js_array.upcast());
+        },
+        HdbReturnValue::OutputParameters(_out) => {
+            return cx.throw_error("OutputParameters not implemented");
+        },
+        HdbReturnValue::Success => {
+            return Ok(cx.string("success").upcast());
+        },
+        HdbReturnValue::XaTransactionIds(_trans_id) => {
+            return cx.throw_error("XaTransactionIds not implemented");
+        },
+    }
+}
 fn convert_hdbresponse<'a>(cx: &mut TaskContext<'a>, res: HdbResponse) -> JsResult<'a, JsValue> {
     if res.count() == 1{
         let mut data = res.return_values;
         let el = data.remove(0);
-        match el {
-            HdbReturnValue::ResultSet(rs) => {
-                return Ok(convert_rs(cx, rs).unwrap().upcast());
-            },
-            HdbReturnValue::AffectedRows(data) => {
-
-                let js_array = JsArray::new(cx, data.len() as u32);
-                for (i, num) in data.iter().enumerate() {
-                    let num = cx.number(*num as f64);
-                    let _  = js_array.set(cx, i as u32, num);
-                }
-
-                return Ok(js_array.upcast());
-            },
-            HdbReturnValue::OutputParameters(_out) => {
-                return cx.throw_error("OutputParameters not implemented");
-                // return Ok(cx.string("outputs").upcast());
-            },
-            HdbReturnValue::Success => {
-                return Ok(cx.string("success").upcast());
-            },
-            HdbReturnValue::XaTransactionIds(_trans_id) => {
-                // return Ok(cx.string("someids").upcast());
-                return cx.throw_error("XaTransactionIds not implemented");
-            },
-        }
+        convert_hdbreturn_value(cx, el)
     }else{
-        unimplemented!()
-        // let data = res.get_data();
-        // for el in data {
-        // }
+        let data = res.return_values;
+        let js_array = JsArray::new(cx, data.len() as u32);
+        let mut i = 0;
+        for el in data {
+
+            let res = convert_hdbreturn_value(cx, el)?;
+            let _  = js_array.set(cx, i as u32, res);
+            i+=1;
+        }
+        Ok(js_array.upcast())
     }
 }
 
