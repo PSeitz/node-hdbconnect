@@ -118,7 +118,20 @@ test('test call procedure', async () => {
     let batch_res = await prep.execute_batch();
     prep.drop();
 
-    // console.log(batch_res)
+});
+
+
+test('test error', async () => {
+
+    await expect(connection.prepare("INSERT INTO not_there (col_blob,t) values(?) ")).rejects.toThrow('Could not find');
+
+    await connection.multiple_statements_ignore_err(["DROP TABLE test_err","CREATE COLUMN TABLE test_err (col_int INT)"]);
+
+    let prep = await connection.prepare("INSERT INTO test_err (col_int) values(?) ");
+    console.log(prep)
+    expect(()=>{prep.add_batch(['NOT_INT'])}).toThrow('cannot be parsed into SQL type some integer');
+
+    prep.drop()
 
 });
 
