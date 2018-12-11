@@ -31,3 +31,6 @@ features = ["tls"]
 [lib]
 crate-type = ["dylib"]
 name = "node_hdbconnect"
+
+[patch.crates-io]
+neon-runtime = { git = 'https://github.com/jjpe/neon' }
