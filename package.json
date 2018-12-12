@@ -3,16 +3,22 @@
   "version": "0.1.0",
   "description": "hana database driver for node - wraps hdbconnect",
   "main": "lib/index.js",
+  "types": "lib/index.d.ts",
   "author": "Pascal Seitz <pascal.seitz@gmail.com>",
   "license": "MIT",
   "dependencies": {
     "neon-cli": "^0.2.0"
   },
   "scripts": {
-    "install": "neon build",
+    "build": "tsc",
+    "install": "neon build;tsc",
     "test": "jest"
   },
   "devDependencies": {
-    "jest": "^23.6.0"
+    "@types/jest": "^23.3.10",
+    "@types/node": "^10.12.12",
+    "jest": "^23.6.0",
+    "ts-jest": "^23.10.5",
+    "typescript": "^3.2.2"
   }
 }

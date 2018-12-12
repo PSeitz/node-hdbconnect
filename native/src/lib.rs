@@ -289,9 +289,10 @@ fn hdb_value_to_js<'a>(cx: &mut TaskContext<'a>, val: HdbValue) -> JsResult<'a, 
         HdbValue::STRING(_) | HdbValue::NSTRING(_) | HdbValue::TEXT(_) | HdbValue::SHORTTEXT(_) => {
             return Ok(cx.string(val.into_typed::<String>().unwrap()).upcast())
         }
-        // HdbValue::SMALLDECIMAL(BigDecimal) | HdbValue::LONGDATE(LongDate) | HdbValue::SECONDDATE(SecondDate) | HdbValue::DAYDATE(DayDate) | HdbValue::SECONDTIME(SecondTime) => {
-
-        // }
+        // HdbValue::SMALLDECIMAL(BigDecimal) {
+        HdbValue::LONGDATE(_) | HdbValue::SECONDDATE(_) | HdbValue::DAYDATE(_) | HdbValue::SECONDTIME(_) => {
+            return Ok(cx.string(val.into_typed::<String>().unwrap()).upcast())
+        }
         HdbValue::N_TINYINT(_)
         | HdbValue::N_SMALLINT(_)
         | HdbValue::N_INT(_)
@@ -347,9 +348,10 @@ fn hdb_value_to_js<'a>(cx: &mut TaskContext<'a>, val: HdbValue) -> JsResult<'a, 
                 return Ok(cx.null().upcast());
             }
         }
-        // HdbValue::N_SMALLDECIMAL(Option<BigDecimal>) | HdbValue::N_SECONDDATE(Option<SecondDate>) | HdbValue::N_DAYDATE(Option<DayDate>) | HdbValue::N_SECONDTIME(Option<SecondTime>) => {
-
-        // }
+        // HdbValue::N_SMALLDECIMAL(Option<BigDecimal>) |
+        HdbValue::N_LONGDATE(_) | HdbValue::N_SECONDDATE(_) | HdbValue::N_DAYDATE(_) | HdbValue::N_SECONDTIME(_) => {
+            try_cast_string!(cx, val, Option<String>);
+        }
 
         _ => {}
     }

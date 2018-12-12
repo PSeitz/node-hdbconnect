@@ -1,8 +1,7 @@
-let hdb = require('.');
-
+const hdb = require('.');
+const fs = require("fs");
 async function getConnection() {
     try {
-        var fs = require("fs");
         var connection_param = JSON.parse(fs.readFileSync("connection.json"));
         let connection = await hdb.createClient(connection_param);
         return connection;
@@ -78,14 +77,13 @@ test('statement can handle everything', async () => {
 });
 
 
-// DATE, TIME, SECONDDATE, TIMESTAMP
+
 // TINYINT, SMALLINT, INTEGER, BIGINT, SMALLDECIMAL, DECIMAL, REAL, DOUBLE
 // BOOLEAN
 // VARCHAR, NVARCHAR, ALPHANUM, SHORTTEXT
 // VARBINARY
 // ARRAY
 // ST_GEOMETRY, ST_POINT
-
 
 test('test lob data types', async () => {
     await connection.multiple_statements_ignore_err(["DROP TABLE lob_types","CREATE COLUMN TABLE lob_types (col_blob BLOB, col_clob CLOB, col_nclob NCLOB, col_text TEXT)"]);
@@ -109,6 +107,40 @@ test('test lob data types', async () => {
     expect(await connection.statement("SELECT col_text FROM lob_types")).toEqual( [ { COL_TEXT: null }, { COL_TEXT: 'nice' } ]);
 });
 
+// DATE, TIME, SECONDDATE, TIMESTAMP
+test('test date data types', async () => {
+    await connection.multiple_statements_ignore_err(["DROP TABLE date_types","CREATE COLUMN TABLE date_types (COL_DATE DATE, COL_TIME TIME, COL_SECONDDATE SECONDDATE, COL_TIMESTAMP TIMESTAMP, COL_DATE_NN DATE, COL_TIME_NN TIME, COL_SECONDDATE_NN SECONDDATE, COL_TIMESTAMP_NN TIMESTAMP)"]);
+
+    const arr = new Uint16Array(2);
+    arr[0] = 5000;
+    arr[1] = 4000;
+    const buf = Buffer.from(arr.buffer);
+
+    await connection.statement("INSERT INTO date_types (COL_DATE, COL_TIME, COL_SECONDDATE, COL_TIMESTAMP, COL_DATE_NN, COL_TIME_NN, COL_SECONDDATE_NN, COL_TIMESTAMP_NN) values('2018-08-12','23:59:59','2018-08-12 10:00:00','2018/01/02 10:00:00', '2018-08-12','23:59:59','2018-08-12 10:00:00','2018/01/02 10:00:00') ");
+    var res = await connection.statement("SELECT COUNT(*) FROM date_types");
+    expect(res).toEqual([{"COUNT(*)": 1}])
+
+    var res = await connection.statement("SELECT * FROM date_types");
+    expect(res).toEqual([{
+        "COL_DATE": "2018-08-12",
+        "COL_DATE_NN": "2018-08-12",
+        "COL_SECONDDATE": "2018-08-12T10:00:00",
+        "COL_SECONDDATE_NN": "2018-08-12T10:00:00",
+        "COL_TIME": "23:59:59",
+        "COL_TIMESTAMP": "2018-01-02T10:00:00.0000000",
+        "COL_TIMESTAMP_NN": "2018-01-02T10:00:00.0000000",
+        "COL_TIME_NN": "23:59:59",
+    }]);
+    // let prep = await connection.prepare("INSERT INTO date_types (col_blob, col_clob, col_nclob, col_text) values(?,?,?,?) ");
+    // prep.add_batch([buf, "test", "test", "nice"]);
+
+    // let batch_res = await prep.execute_batch();
+    // prep.drop();
+
+    // expect(await connection.statement("SELECT col_blob FROM date_types")).toEqual([ { COL_BLOB: null }, { COL_BLOB: buf } ]);
+    // expect(await connection.statement("SELECT col_nclob FROM date_types")).toEqual([ { COL_NCLOB: 'oge' }, { COL_NCLOB: 'test' } ]);
+    // expect(await connection.statement("SELECT col_text FROM date_types")).toEqual( [ { COL_TEXT: null }, { COL_TEXT: 'nice' } ]);
+});
 
 test('test call procedure', async () => {
 
@@ -119,7 +151,6 @@ test('test call procedure', async () => {
     prep.drop();
 
 });
-
 
 test('test error', async () => {
 
@@ -135,4 +166,26 @@ test('test error', async () => {
 
 });
 
+test('bytes to nclob', async () => {
+    await connection.multiple_statements_ignore_err(["DROP TABLE lob_types","CREATE COLUMN TABLE lob_types (col_nclob NCLOB, col_nclob_nn NCLOB not null)"]);
+
+    const arr = new Uint16Array(2);
+    arr[0] = 5000;
+    arr[1] = 4000;
+    const buf = Buffer.from(arr.buffer);
+
+    let prep = await connection.prepare("INSERT INTO lob_types (col_nclob, col_nclob_nn) values(?,?) ");
+    expect(()=>{prep.add_batch([buf, buf])}).toThrow('invalid utf-8');
+
+    //test buffer
+    fs.writeFileSync("test_text", "test");
+    var data = fs.readFileSync('test_text');
+    prep.add_batch([data, data]);
+
+    let batch_res = await prep.execute_batch();
+    prep.drop();
+
+    var res = await connection.statement("SELECT * FROM lob_types");
+    expect(res).toEqual([{"COL_NCLOB": "test","COL_NCLOB_NN": "test"}]);
+});
 
