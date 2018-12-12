@@ -9,7 +9,7 @@
   "dependencies": {
     "neon-cli": "^0.2.0"
   },
-  "prepare" : "npm run build",
+  "prepare": "npm run build",
   "scripts": {
     "build": "tsc",
     "install": "neon build",

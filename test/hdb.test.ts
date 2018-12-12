@@ -1,7 +1,9 @@
-const hdb = require('.');
+const hdb = require('node-hdbconnect');
 const fs = require("fs");
+
 async function getConnection() {
     try {
+        var fs = require("fs");
         var connection_param = JSON.parse(fs.readFileSync("connection.json"));
         let connection = await hdb.createClient(connection_param);
         return connection;
@@ -10,7 +12,7 @@ async function getConnection() {
     }
 }
 
-let connection;
+let connection:Connection;
 
 beforeAll(async () => {
     connection = await getConnection();
@@ -19,7 +21,6 @@ beforeAll(async () => {
 afterAll(async () => {
     connection.close();
 });
-
 
 
 test('insert ', async () => {
@@ -151,7 +152,6 @@ test('test error', async () => {
     await connection.multiple_statements_ignore_err(["DROP TABLE test_err","CREATE COLUMN TABLE test_err (col_int INT)"]);
 
     let prep = await connection.prepare("INSERT INTO test_err (col_int) values(?) ");
-    console.log(prep)
     expect(()=>{prep.add_batch(['NOT_INT'])}).toThrow('cannot be parsed into SQL type some integer');
 
     prep.drop()
@@ -214,9 +214,8 @@ test('test parameter binding corner cases', async () => {
         expect(res).toEqual([{"TASKCOUNT": 2}]);
     }
 
-    { //prepare without parameters, undefined add_batch
-        let res = await connection.execute_prepare(query_no_bound_params, [undefined, undefined])
-        expect(res).toEqual([{"TASKCOUNT": 2}]);
+    { //ERROR: prepare without parameters, undefined add_batch
+        await expect(connection.execute_prepare(query_no_bound_params, [undefined, undefined])).rejects.toThrow('too many parameters');
     }
 
     { //prepare with correctly bound parameter
@@ -234,4 +233,3 @@ test('test parameter binding corner cases', async () => {
 
 
 });
-
