@@ -131,15 +131,7 @@ test('test date data types', async () => {
         "COL_TIMESTAMP_NN": "2018-01-02T10:00:00.0000000",
         "COL_TIME_NN": "23:59:59",
     }]);
-    // let prep = await connection.prepare("INSERT INTO date_types (col_blob, col_clob, col_nclob, col_text) values(?,?,?,?) ");
-    // prep.add_batch([buf, "test", "test", "nice"]);
 
-    // let batch_res = await prep.execute_batch();
-    // prep.drop();
-
-    // expect(await connection.statement("SELECT col_blob FROM date_types")).toEqual([ { COL_BLOB: null }, { COL_BLOB: buf } ]);
-    // expect(await connection.statement("SELECT col_nclob FROM date_types")).toEqual([ { COL_NCLOB: 'oge' }, { COL_NCLOB: 'test' } ]);
-    // expect(await connection.statement("SELECT col_text FROM date_types")).toEqual( [ { COL_TEXT: null }, { COL_TEXT: 'nice' } ]);
 });
 
 test('test call procedure', async () => {
@@ -187,5 +179,59 @@ test('bytes to nclob', async () => {
 
     var res = await connection.statement("SELECT * FROM lob_types");
     expect(res).toEqual([{"COL_NCLOB": "test","COL_NCLOB_NN": "test"}]);
+});
+
+
+test('test parameter binding corner cases', async () => {
+    await connection.multiple_statements_ignore_err(["DROP TABLE TASK_LISTS"]);
+    await connection.statement("CREATE COLUMN TABLE TASK_LISTS (ID INT, STEP_STATUS NVARCHAR(100), TASK_NAME NVARCHAR(100))");
+
+    await connection.statement("INSERT INTO TASK_LISTS (ID, STEP_STATUS,TASK_NAME) values(1,'initial','nice1_task') ");
+    await connection.statement("INSERT INTO TASK_LISTS (ID, STEP_STATUS,TASK_NAME) values(2,'running','nice2_task') ");
+    await connection.statement("INSERT INTO TASK_LISTS (ID, STEP_STATUS,TASK_NAME) values(3,'stopped','nice3_task') ");
+
+    let query_no_bound_params     = "SELECT COUNT(ID) AS TASKCOUNT FROM TASK_LISTS WHERE \"STEP_STATUS\" = 'initial' OR \"STEP_STATUS\"='running'";
+    let query_single_bound_params = "SELECT COUNT(ID) AS TASKCOUNT FROM TASK_LISTS WHERE \"STEP_STATUS\" = ? OR \"STEP_STATUS\"='running'";
+
+    { //statement, no variables
+        let res = await connection.statement(query_no_bound_params);
+        expect(res).toEqual([{"TASKCOUNT": 2}]);
+    }
+
+    { //ERROR: invalid statement, unbound variables
+        await expect(connection.statement(query_single_bound_params)).rejects.toThrow('not all variables bound');
+    }
+
+    { //prepare without parameters
+        let prep = await connection.prepare(query_no_bound_params);
+        let res = await prep.execute_batch();
+        prep.drop()
+        expect(res).toEqual([{"TASKCOUNT": 2}]);
+    }
+
+    { //prepare without parameters, empty add_batch
+        let res = await connection.execute_prepare(query_no_bound_params, [])
+        expect(res).toEqual([{"TASKCOUNT": 2}]);
+    }
+
+    { //prepare without parameters, undefined add_batch
+        let res = await connection.execute_prepare(query_no_bound_params, [undefined, undefined])
+        expect(res).toEqual([{"TASKCOUNT": 2}]);
+    }
+
+    { //prepare with correctly bound parameter
+        let res = await connection.execute_prepare(query_single_bound_params, ['initial'])
+        expect(res).toEqual([{"TASKCOUNT": 2}]);
+    }
+
+    { //ERROR: prepare with too much bound parameter
+        await expect(connection.execute_prepare(query_single_bound_params, ['initial','running'])).rejects.toThrow('too many parameters');
+    }
+
+    { //ERROR: prepare with not enough bound parameter
+        await expect(connection.execute_prepare(query_single_bound_params, [])).rejects.toThrow('some paramters are missing');
+    }
+
+
 });
 

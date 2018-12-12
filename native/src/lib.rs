@@ -613,6 +613,9 @@ fn add_row(mut cx:FunctionContext) -> JsResult<JsValue>{ //HdbResult<()>
     if prep.input_parameter_descriptors().is_some() {
         let data = {
             let params_desc = prep.input_parameter_descriptors().unwrap();
+            if vec.len() > params_desc.len(){
+                return cx.throw_error("too many parameters");
+            }
             let data:Vec<HdbValue> = vec.into_iter().enumerate().map(|(i, val)| {
                 js_to_hdb_value(&mut cx, val, params_desc[i].clone())
             }).collect();
