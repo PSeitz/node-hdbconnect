@@ -1,21 +1,3 @@
-# node-hdbconnect
-
-HANA database driver for node - uses [hdbconnect](https://github.com/emabee/rust-hdbconnect)
-
-## Prerequisites
-
-- Rust: `curl https://sh.rustup.rs -sSf | sh`
-
-- Node Build Dependencies: https://guides.neon-bindings.com/getting-started/
-
-
-
-## Example
-
-`npm install --save  PSeitz/node-hdbconnect`
-
-```javascript
-
 const hdb = require('node-hdbconnect');
 async function test(){
 
@@ -49,6 +31,3 @@ async function test(){
 }
 
 test();
-
-
-```

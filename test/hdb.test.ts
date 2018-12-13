@@ -34,22 +34,52 @@ test('insert ', async () => {
     let batch_res = await prep.execute_batch();
     prep.drop();
 
-    var res = await connection.query("SELECT COUNT(*) FROM tab");
+    var res = await connection.statement("SELECT COUNT(*) FROM tab");
     expect(res).toEqual([{"COUNT(*)": 3}]);
-    var res = await connection.query("SELECT ID FROM tab WHERE NAME = 'nice'");
+    var res = await connection.statement("SELECT ID FROM tab WHERE NAME = 'nice'");
 
-    var res = await connection.query("SELECT ID FROM tab WHERE NAME = 'nice'");
+    var res = await connection.statement("SELECT ID FROM tab WHERE NAME = 'nice'");
     expect(res).toEqual([{"ID":10}]);
-    var res = await connection.dml(`UPDATE TAB
+    var res = await connection.statement(`UPDATE TAB
         SET ID = '12'
         WHERE NAME = 'nice';`);
 
-    var res = await connection.query("SELECT ID FROM tab WHERE NAME = 'nice'");
+    var res = await connection.statement("SELECT ID FROM tab WHERE NAME = 'nice'");
     expect(res).toEqual([{"ID":12}]);
 
-    await connection.exec("DROP TABLE tab");
+    await connection.statement("DROP TABLE tab");
 
-    await expect(connection.query("SELECT ID FROM tab WHERE NAME = 'nice'")).rejects.toEqual(new Error('DbError(error [code: 259, sql state: HY000] at position 15: "invalid table name:  Could not find table/view TAB in schema SYSTEM: line 1 col 16 (at pos 15)")'));
+    await expect(connection.statement("SELECT ID FROM tab WHERE NAME = 'nice'")).rejects.toEqual(new Error('DbError(error [code: 259, sql state: HY000] at position 15: "invalid table name:  Could not find table/view TAB in schema SYSTEM: line 1 col 16 (at pos 15)")'));
+});
+
+
+test('insert ', async () => {
+    await connection.multiple_statements_ignore_err(["DROP TABLE tab","CREATE COLUMN TABLE tab (ID INT, NAME NVARCHAR (10))"]);
+
+    let prep = await connection.prepare("INSERT INTO tab (ID,NAME) values(?,?) ");
+    prep.add_batch([10, "nice"]);
+    prep.add_batch([11, undefined]);
+    prep.add_batch([undefined, undefined]);
+
+    let batch_res = await prep.execute_batch();
+    prep.drop();
+
+    var res = await connection.statement("SELECT COUNT(*) FROM tab");
+    expect(res).toEqual([{"COUNT(*)": 3}]);
+    var res = await connection.statement("SELECT ID FROM tab WHERE NAME = 'nice'");
+
+    var res = await connection.statement("SELECT ID FROM tab WHERE NAME = 'nice'");
+    expect(res).toEqual([{"ID":10}]);
+    var res = await connection.statement(`UPDATE TAB
+        SET ID = '12'
+        WHERE NAME = 'nice';`);
+
+    var res = await connection.statement("SELECT ID FROM tab WHERE NAME = 'nice'");
+    expect(res).toEqual([{"ID":12}]);
+
+    await connection.statement("DROP TABLE tab");
+
+    await expect(connection.statement("SELECT ID FROM tab WHERE NAME = 'nice'")).rejects.toEqual(new Error('DbError(error [code: 259, sql state: HY000] at position 15: "invalid table name:  Could not find table/view TAB in schema SYSTEM: line 1 col 16 (at pos 15)")'));
 });
 
 test('statement can handle everything', async () => {
@@ -65,14 +95,14 @@ test('statement can handle everything', async () => {
 
     var res = await connection.statement("SELECT ID FROM tab WHERE NAME = 'nice'");
     expect(res).toEqual([{"ID":10}]);
-    var res = await connection.dml(`UPDATE TAB
+    var res = await connection.statement(`UPDATE TAB
         SET ID = '12'
         WHERE NAME = 'nice';`);
 
     var res = await connection.statement("SELECT ID FROM tab WHERE NAME = 'nice'");
     expect(res).toEqual([{"ID":12}]);
 
-    await connection.exec("DROP TABLE tab");
+    await connection.statement("DROP TABLE tab");
 
     await expect(connection.statement("SELECT ID FROM tab WHERE NAME = 'nice'")).rejects.toEqual(new Error('DbError(error [code: 259, sql state: HY000] at position 15: "invalid table name:  Could not find table/view TAB in schema SYSTEM: line 1 col 16 (at pos 15)")'));
 });
@@ -95,11 +125,8 @@ test('test lob data types', async () => {
     const buf = Buffer.from(arr.buffer);
 
     await connection.statement("INSERT INTO lob_types (col_nclob) values('oge') ");
-    let prep = await connection.prepare("INSERT INTO lob_types (col_blob, col_clob, col_nclob, col_text) values(?,?,?,?) ");
-    prep.add_batch([buf, "test", "test", "nice"]);
 
-    let batch_res = await prep.execute_batch();
-    prep.drop();
+    let prep = await connection.execute_prepare("INSERT INTO lob_types (col_blob, col_clob, col_nclob, col_text) values(?,?,?,?) ", [buf, "test", "test", "nice"]);
 
     var res = await connection.statement("SELECT COUNT(*) FROM lob_types");
     expect(res).toEqual([{"COUNT(*)": 2}]);
@@ -182,16 +209,39 @@ test('bytes to nclob', async () => {
 });
 
 
+test('update with prepared statement', async () => {
+    await connection.multiple_statements_ignore_err(["DROP TABLE TASK_LISTS"]);
+    await connection.statement("CREATE COLUMN TABLE TASK_LISTS (ID BIGINT, JOB_ID NVARCHAR(100), STEP_STATUS NVARCHAR(100), TASK_NAME NVARCHAR(100), MARKED_HARVESTED INT)");
+
+    await connection.statement("INSERT INTO TASK_LISTS (ID, JOB_ID, STEP_STATUS,TASK_NAME, MARKED_HARVESTED) values(4569145722365,'JOB_9000','success','nice1_task', 0) ");
+    await connection.statement("INSERT INTO TASK_LISTS (ID, JOB_ID, STEP_STATUS,TASK_NAME, MARKED_HARVESTED) values(0000000000000,'JOB_8000','running','nice2_task', 0) ");
+    await connection.statement("INSERT INTO TASK_LISTS (ID, JOB_ID, STEP_STATUS,TASK_NAME, MARKED_HARVESTED) values(1000000000000,'JOB_7000','stopped','nice3_task', 0) ");
+
+    let query = `UPDATE TASK_LISTS
+        SET MARKED_HARVESTED = 2
+       WHERE ID IN (?)
+       AND (STEP_STATUS = 'success'
+       OR STEP_STATUS = 'failed')
+       AND JOB_ID = ?`;
+
+    let res = await connection.execute_prepare(query, [4569145722365, "JOB_9000"]);
+    expect(res).toEqual([1]);
+
+    res = await connection.execute_prepare(query, [4569145722365, "NO_HIT"]);
+    expect(res).toEqual([0]);
+
+});
+
 test('test parameter binding corner cases', async () => {
     await connection.multiple_statements_ignore_err(["DROP TABLE TASK_LISTS"]);
-    await connection.statement("CREATE COLUMN TABLE TASK_LISTS (ID INT, STEP_STATUS NVARCHAR(100), TASK_NAME NVARCHAR(100))");
+    await connection.statement("CREATE COLUMN TABLE TASK_LISTS (JOB_ID BIGINT, STEP_STATUS NVARCHAR(100), TASK_NAME NVARCHAR(100))");
 
-    await connection.statement("INSERT INTO TASK_LISTS (ID, STEP_STATUS,TASK_NAME) values(1,'initial','nice1_task') ");
-    await connection.statement("INSERT INTO TASK_LISTS (ID, STEP_STATUS,TASK_NAME) values(2,'running','nice2_task') ");
-    await connection.statement("INSERT INTO TASK_LISTS (ID, STEP_STATUS,TASK_NAME) values(3,'stopped','nice3_task') ");
+    await connection.statement("INSERT INTO TASK_LISTS (JOB_ID, STEP_STATUS,TASK_NAME) values(1,'initial','nice1_task') ");
+    await connection.statement("INSERT INTO TASK_LISTS (JOB_ID, STEP_STATUS,TASK_NAME) values(2,'running','nice2_task') ");
+    await connection.statement("INSERT INTO TASK_LISTS (JOB_ID, STEP_STATUS,TASK_NAME) values(3,'stopped','nice3_task') ");
 
-    let query_no_bound_params     = "SELECT COUNT(ID) AS TASKCOUNT FROM TASK_LISTS WHERE \"STEP_STATUS\" = 'initial' OR \"STEP_STATUS\"='running'";
-    let query_single_bound_params = "SELECT COUNT(ID) AS TASKCOUNT FROM TASK_LISTS WHERE \"STEP_STATUS\" = ? OR \"STEP_STATUS\"='running'";
+    let query_no_bound_params     = "SELECT COUNT(JOB_ID) AS TASKCOUNT FROM TASK_LISTS WHERE \"STEP_STATUS\" = 'initial' OR \"STEP_STATUS\"='running'";
+    let query_single_bound_params = "SELECT COUNT(JOB_ID) AS TASKCOUNT FROM TASK_LISTS WHERE \"STEP_STATUS\" = ? OR \"STEP_STATUS\"='running'";
 
     { //statement, no variables
         let res = await connection.statement(query_no_bound_params);

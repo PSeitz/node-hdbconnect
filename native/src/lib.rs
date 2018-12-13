@@ -16,13 +16,11 @@ extern crate serde_db;
 extern crate serde_bytes;
 
 use serde_db::ser::to_params;
-// use serde_db::ser::SerializationError;
 
 use hdbconnect::{Connection, HdbResult, HdbError, HdbValue, HdbResponse, PreparedStatement, HdbReturnValue, ParameterDescriptor};
 use hdbconnect::ResultSet;
 use hdbconnect::ServerCerts;
 use hdbconnect::ConnectParams;
-// use parking_lot::RwLock;
 use parking_lot::Mutex;
 
 
@@ -289,7 +287,6 @@ fn hdb_value_to_js<'a>(cx: &mut TaskContext<'a>, val: HdbValue) -> JsResult<'a, 
         HdbValue::STRING(_) | HdbValue::NSTRING(_) | HdbValue::TEXT(_) | HdbValue::SHORTTEXT(_) => {
             return Ok(cx.string(val.into_typed::<String>().unwrap()).upcast())
         }
-        // HdbValue::SMALLDECIMAL(BigDecimal) {
         HdbValue::LONGDATE(_) | HdbValue::SECONDDATE(_) | HdbValue::DAYDATE(_) | HdbValue::SECONDTIME(_) => {
             return Ok(cx.string(val.into_typed::<String>().unwrap()).upcast())
         }
@@ -326,7 +323,6 @@ fn hdb_value_to_js<'a>(cx: &mut TaskContext<'a>, val: HdbValue) -> JsResult<'a, 
             let val = val.into_typed::<String>().unwrap();
             return Ok(cx.string(val).upcast());
         }
-        // HdbValue::N_BLOB(Some(mut blob)) => {
         HdbValue::N_BLOB(_) => {
             if let Some(val) = val.try_into::<Option<serde_bytes::ByteBuf>>().unwrap() {
                 let val: &[u8] = val.as_ref();
@@ -348,16 +344,14 @@ fn hdb_value_to_js<'a>(cx: &mut TaskContext<'a>, val: HdbValue) -> JsResult<'a, 
                 return Ok(cx.null().upcast());
             }
         }
-        // HdbValue::N_SMALLDECIMAL(Option<BigDecimal>) |
         HdbValue::N_LONGDATE(_) | HdbValue::N_SECONDDATE(_) | HdbValue::N_DAYDATE(_) | HdbValue::N_SECONDTIME(_) => {
             try_cast_string!(cx, val, Option<String>);
         }
 
-        _ => {}
+        HdbValue::SMALLDECIMAL(_) | HdbValue::N_SMALLDECIMAL(_) => {
+            return cx.throw_error("SMALLDECIMAL not yet implemented");
+        }
     }
-
-    Ok(cx.undefined().upcast())
-
 
 }
 
@@ -384,39 +378,6 @@ fn convert_rs<'a>(cx: &mut TaskContext<'a>, rs: ResultSet) -> JsResult<'a, JsArr
 }
 
 
-struct QueryTask{
-    query:String,
-    conn_id: String,
-}
-
-impl Task for QueryTask {
-    type Output = ResultSet; // the result
-    type Error = HdbError;
-    type JsEvent = JsValue;
-
-    fn perform(&self) -> Result<Self::Output, Self::Error> {
-        let res:HdbResult<ResultSet> = (*CONNECTIONS).get_mut(&self.conn_id).unwrap().query(&self.query);
-        Ok(res?)
-    }
-
-    fn complete(self, mut cx: TaskContext, res: Result<Self::Output, Self::Error>) -> JsResult<Self::JsEvent> {
-        match res {
-            Ok(res) => Ok(convert_rs(&mut cx, res).unwrap().upcast()),
-            Err(res) => cx.throw_error(&format!("{:?}", res)),
-        }
-    }
-}
-
-// // This generic method can handle all kinds of calls, and thus has the most complex return type. In many cases it will be more appropriate to use one of the methods query(), dml(), exec(), which have the adequate simple result type you usually want.
-fn query(mut cx:FunctionContext) -> JsResult<JsUndefined>{ //HdbResult<ResultSet>
-    let conn_id = cx.argument::<JsString>(0)?.value();
-    let query = cx.argument::<JsString>(1)?.value();
-    let f = cx.argument::<JsFunction>(2)?;
-    QueryTask{conn_id, query}.schedule(f);
-    Ok(cx.undefined())
-}
-
-
 struct StatementTask{
     statement:String,
     conn_id: String,
@@ -440,78 +401,19 @@ impl Task for StatementTask {
     }
 }
 
-// // This generic method can handle all kinds of calls, and thus has the most complex return type. In many cases it will be more appropriate to use one of the methods query(), dml(), exec(), which have the adequate simple result type you usually want.
+// This generic method can handle all kinds of calls, and thus has the most complex return type. In many cases it will be more appropriate to use one of the methods query(), dml(), exec(), which have the adequate simple result type you usually want.
 fn statement(mut cx:FunctionContext) -> JsResult<JsUndefined>{ //HdbResult<ResultSet>
     let conn_id = cx.argument::<JsString>(0)?.value();
-    let statement = cx.argument::<JsString>(1)?.value();
     let f = cx.argument::<JsFunction>(2)?;
-    StatementTask{conn_id, statement}.schedule(f);
+    if let Ok(single) = cx.argument::<JsString>(1) {
+        let statement = single.value();
+        StatementTask{conn_id, statement}.schedule(f);
+    }else{
+        return cx.throw_error("statement handles only strings");
+    }
+
     Ok(cx.undefined())
 }
-
-struct ExecTask{
-    query:String,
-    conn_id: String,
-}
-
-impl Task for ExecTask {
-    type Output = ();
-    type Error = HdbError;
-    type JsEvent = JsUndefined;
-
-    fn perform(&self) -> Result<Self::Output, Self::Error> {
-        let res:HdbResult<()> = (*CONNECTIONS).get_mut(&self.conn_id).unwrap().exec(&self.query);
-        Ok(res?)
-    }
-
-    fn complete(self, mut cx: TaskContext, res: Result<Self::Output, Self::Error>) -> JsResult<Self::JsEvent> {
-        match res {
-            Ok(_) => Ok(cx.undefined()),
-            Err(res) => cx.throw_error(&format!("{:?}", res)),
-        }
-    }
-}
-
-fn exec(mut cx:FunctionContext) -> JsResult<JsUndefined>{ //HdbResult<ResultSet>
-    let conn_id = cx.argument::<JsString>(0)?.value();
-    let query = cx.argument::<JsString>(1)?.value();
-    let f = cx.argument::<JsFunction>(2)?;
-    ExecTask{conn_id, query}.schedule(f);
-    Ok(cx.undefined())
-}
-
-
-struct DmlTask{
-    query:String,
-    conn_id: String,
-}
-
-impl Task for DmlTask {
-    type Output = usize;
-    type Error = HdbError;
-    type JsEvent = JsNumber;
-
-    fn perform(&self) -> Result<Self::Output, Self::Error> {
-        let res:HdbResult<usize> = (*CONNECTIONS).get_mut(&self.conn_id).unwrap().dml(&self.query);
-        Ok(res?)
-    }
-
-    fn complete(self, mut cx: TaskContext, res: Result<Self::Output, Self::Error>) -> JsResult<Self::JsEvent> {
-        match res {
-            Ok(res) => Ok(cx.number(res as f64)),
-            Err(res) => cx.throw_error(&format!("{:?}", res)),
-        }
-    }
-}
-
-fn dml(mut cx:FunctionContext) -> JsResult<JsUndefined>{ //HdbResult<ResultSet>
-    let conn_id = cx.argument::<JsString>(0)?.value();
-    let query = cx.argument::<JsString>(1)?.value();
-    let f = cx.argument::<JsFunction>(2)?;
-    DmlTask{conn_id, query}.schedule(f);
-    Ok(cx.undefined())
-}
-
 
 struct PrepareStatementTask{
     stmt:String,
@@ -596,8 +498,6 @@ fn multiple_statements_ignore_err(mut cx:FunctionContext) -> JsResult<JsUndefine
     MultipleStatementsIgnoreErr{conn_id, queries}.schedule(f);
     Ok(cx.undefined())
 }
-
-
 
 // Commits the current transaction.
 fn add_row(mut cx:FunctionContext) -> JsResult<JsValue>{ //HdbResult<()>
@@ -777,10 +677,7 @@ register_module!(mut cx, {
     cx.export_function("createClient", create_client)?;
     cx.export_function("dropClient", drop_client)?;
     cx.export_function("dropStatement", drop_statement)?;
-    cx.export_function("query", query)?;
     cx.export_function("statement", statement)?;
-    cx.export_function("exec", exec)?;
-    cx.export_function("dml", dml)?;
     cx.export_function("multiple_statements_ignore_err", multiple_statements_ignore_err)?;
     cx.export_function("set_auto_commit", set_auto_commit)?;
     cx.export_function("is_auto_commit", is_auto_commit)?;

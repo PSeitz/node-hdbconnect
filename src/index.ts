@@ -2,11 +2,8 @@ var addon = require('../native');
 
 const {promisify} = require('util');
 
-const createClient = promisify(addon.createClient);
-const query = promisify(addon.query);
+const createClientProm = promisify(addon.createClient);
 const statement = promisify(addon.statement);
-const exec = promisify(addon.exec);
-const dml = promisify(addon.dml);
 const multiple_statements_ignore_err = promisify(addon.multiple_statements_ignore_err);
 const prepare = promisify(addon.prepare);
 const execute_batch = promisify(addon.execute_batch);
@@ -19,12 +16,22 @@ interface ConnectionParameters {
     tls?: string;
 }
 
-async function createClientWrap(opt:ConnectionParameters):Promise<Connection> {
-    let client_id = await createClient(opt)
+/**
+ * Opens a new connection.
+ *
+ * @remarks
+ * Don't forget to close() the connection.
+ *
+ * @param opt - The ConnectionParameters
+ * @returns A Promise to a connection handle.
+ *
+ */
+async function createClient(opt:ConnectionParameters):Promise<Connection> {
+    let client_id = await createClientProm(opt)
     return new Connection(client_id)
 }
 
-exports.createClient = createClientWrap;
+exports.createClient = createClient;
 
 class Connection {
     private id: string;
@@ -35,17 +42,8 @@ class Connection {
     close() {
         return addon.dropClient(this.id)
     }
-    query(stmt:string):any[] {
-        return query(this.id, stmt)
-    }
-    statement(stmt:string):any[] {
+    statement(stmt:string):Promise<any[]> {
         return statement(this.id, stmt)
-    }
-    exec(stmt:string):any[] {
-        return exec(this.id, stmt)
-    }
-    dml(stmt:string):any[] {
-        return dml(this.id, stmt)
     }
     multiple_statements_ignore_err(stmt:string[]) {
         return multiple_statements_ignore_err(this.id, stmt)
@@ -77,11 +75,23 @@ class Connection {
     set_application_source(val:string) {
         return addon.set_application_source(this.id, val)
     }
+
+    /**
+     * Creates a new prepared statement.
+     *
+     * @remarks
+     * Don't forget to drop() the prepared statement.
+     *
+     */
     async prepare(stmt:string):Promise<PreparedStatement> {
         let prepared_statement_id:string = await prepare(this.id, stmt)
         return new PreparedStatement(prepared_statement_id);
     }
-    async execute_prepare(stmt:string, data: any[]) {
+
+    /**
+     * Creates a new prepared statemen, binds values and drops the prepared statement..
+     */
+    async execute_prepare(stmt:string, data: any[]):Promise<any[]>{
         let prep = await this.prepare(stmt);
         try{
             prep.add_batch(data);
@@ -105,14 +115,13 @@ class PreparedStatement {
     constructor(id: string) {
         this.id = id;
     }
-
     add_batch(data:any[]) {
         return addon.add_row(this.id, data)
     }
-    execute_batch():any[] {
+    execute_batch():Promise<any[]> {
         return execute_batch(this.id)
     }
-    drop () {
+    drop() {
         return addon.dropStatement(this.id)
     }
 }

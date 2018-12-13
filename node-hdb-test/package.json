@@ -1,0 +1,16 @@
+{
+  "name": "hdb-test",
+  "version": "1.0.0",
+  "description": "sample app for node-hdbconnect",
+  "main": "example.js",
+  "dependencies": {
+    "node-hdbconnect": "^0.1.0",
+    "neon-cli": "^0.2.0"
+  },
+  "devDependencies": {},
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC"
+}
