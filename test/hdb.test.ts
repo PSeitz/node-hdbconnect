@@ -1,4 +1,4 @@
-import {createClient, Connection} from '../src/index'
+import {createClient, Connection, get_num_connections, get_num_prepared_statements} from '../src/index'
 const fs = require("fs");
 
 async function getConnection() {
@@ -20,6 +20,8 @@ beforeAll(async () => {
 
 afterAll(async () => {
     connection.close();
+    expect(get_num_connections()).toEqual(0)
+    expect(get_num_prepared_statements()).toEqual(0)
 });
 
 
@@ -61,8 +63,7 @@ test('insert ', async () => {
     prep.add_batch([11, undefined]);
     prep.add_batch([undefined, undefined]);
 
-    let batch_res = await prep.execute_batch();
-    prep.drop();
+    let batch_res = await prep.execute_batch_and_drop();
 
     var res = await connection.statement("SELECT COUNT(*) FROM tab");
     expect(res).toEqual([{"COUNT(*)": 3}]);

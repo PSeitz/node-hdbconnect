@@ -666,6 +666,14 @@ fn js_to_hdb_value<'a>(cx: &mut FunctionContext<'a>, v: Handle<JsValue>, desc: P
 
 }
 
+fn get_num_connections(mut cx: FunctionContext) -> JsResult<JsNumber> {
+    Ok(cx.number(CONNECTIONS.len() as f64))
+}
+
+fn get_num_prepared_statements(mut cx: FunctionContext) -> JsResult<JsNumber> {
+    Ok(cx.number(PREPARED_STATEMENTS.len() as f64))
+}
+
 // get_server_resource_consumption_info
 // spawn
 // multiple_statements
@@ -674,6 +682,8 @@ fn js_to_hdb_value<'a>(cx: &mut FunctionContext<'a>, v: Handle<JsValue>, desc: P
 // execute_with_debuginfo
 
 register_module!(mut cx, {
+    cx.export_function("get_num_connections", get_num_connections)?;
+    cx.export_function("get_num_prepared_statements", get_num_prepared_statements)?;
     cx.export_function("createClient", create_client)?;
     cx.export_function("dropClient", drop_client)?;
     cx.export_function("dropStatement", drop_statement)?;

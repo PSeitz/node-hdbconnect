@@ -16,6 +16,14 @@ interface IConnectionParameters {
  *
  */
 export declare function createClient(opt: IConnectionParameters): Promise<Connection>;
+/**
+ * Returns the number of the internally hold connection. The connection does live in the native code and has to be closed by the caller.
+ */
+export declare function get_num_connections(): number;
+/**
+ * Returns the number of the internally hold prepared statements. Prepared statements live in the native code and have to be removed by the caller, when finished using.
+ */
+export declare function get_num_prepared_statements(): number;
 export declare class Connection {
     private id;
     constructor(id: string);
@@ -55,6 +63,7 @@ export declare class PreparedStatement {
     constructor(id: string);
     add_batch(data: any[]): any;
     execute_batch(): Promise<any[]>;
+    execute_batch_and_drop(): Promise<any[]>;
     drop(): any;
 }
 export {};

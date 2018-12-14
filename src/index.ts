@@ -30,6 +30,20 @@ export async function createClient(opt: IConnectionParameters): Promise<Connecti
     return new Connection(client_id);
 }
 
+/**
+ * Returns the number of the internally hold connection. The connection does live in the native code and has to be closed by the caller.
+ */
+export function get_num_connections(): number {
+    return addon.get_num_connections()
+}
+
+/**
+ * Returns the number of the internally hold prepared statements. Prepared statements live in the native code and have to be removed by the caller, when finished using.
+ */
+export function get_num_prepared_statements(): number {
+    return addon.get_num_prepared_statements()
+}
+
 export class Connection {
     private id: string;
     constructor(id: string) {
@@ -92,11 +106,11 @@ export class Connection {
         const prep = await this.prepare(stmt);
         try {
             prep.add_batch(data);
-            return prep.execute_batch();
         } catch (e) {
             prep != null && prep.drop();
-            throw e;
+            throw(e);
         }
+        return prep.execute_batch_and_drop()
     }
     /**
      * Creates a new prepared statemen, binds values and drops the prepared statement..
@@ -122,6 +136,16 @@ export class PreparedStatement {
     }
     public execute_batch(): Promise<any[]> {
         return execute_batch(this.id);
+    }
+    public async execute_batch_and_drop(): Promise<any[]> {
+        try {
+            let res = await this.execute_batch();
+            this.drop();
+            return res;
+        } catch (e) {
+            this.drop()
+            throw(e);
+        }
     }
     public drop() {
         return addon.dropStatement(this.id);
