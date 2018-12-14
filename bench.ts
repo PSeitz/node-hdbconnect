@@ -17,7 +17,7 @@ async function getConnection() {
 }
 
 class Packet{
-    private connection: Connection;
+    public connection: Connection;
     private num: number;
     constructor(connection: Connection) {
         this.connection = connection;
@@ -45,8 +45,8 @@ class Packet{
 }
 
 async function startBench(argument) {
-
-    let query_packets:[Packet] = await Promise.all(Array(2).fill().map(async (i)=>{
+    let nums = [...Array(5)].map((_,i) => i);
+    let query_packets:[Packet] = await Promise.all(nums.map(async (i)=>{
         let connection = await getConnection();
         return new Packet(connection)
         // return {
@@ -71,14 +71,14 @@ async function startBench(argument) {
 
     var t0 = performance.now();
 
-    await Promise.all(query_packets.map(el => el.prepare(el.connection)));
+    await Promise.all(query_packets.map(el => el.prepare()));
 
     for (let el of Array(10).fill())
     {
         await Promise.all(query_packets.map(el => el.connection.close()));
     }
 
-    await Promise.all(query_packets.map(el => el.cleanup(el.connection)));
+    await Promise.all(query_packets.map(el => el.cleanup()));
 
 
     var t1 = performance.now();
