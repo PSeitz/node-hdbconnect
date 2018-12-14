@@ -1,6 +1,5 @@
-var addon = require('../native');
-
-const {promisify} = require('util');
+const addon = require('../native');
+import {promisify} from 'util';
 
 const createClientProm = promisify(addon.createClient);
 const statement = promisify(addon.statement);
@@ -39,40 +38,40 @@ class Connection {
         this.id = id;
     }
 
-    close() {
+    public close() {
         return addon.dropClient(this.id)
     }
-    statement(stmt:string):Promise<any[]> {
+    public statement(stmt:string):Promise<any[]> {
         return statement(this.id, stmt)
     }
-    multiple_statements_ignore_err(stmt:string[]) {
+    public multiple_statements_ignore_err(stmt:string[]) {
         return multiple_statements_ignore_err(this.id, stmt)
     }
-    set_auto_commit(bool:boolean) {
+    public set_auto_commit(bool:boolean) {
         return addon.set_auto_commit(this.id, bool)
     }
-    is_auto_commit() {
+    public is_auto_commit() {
         return addon.is_auto_commit(this.id)
     }
-    set_fetch_size(val:number) {
+    public set_fetch_size(val:number) {
         return addon.set_fetch_size(this.id, val)
     }
-    get_lob_read_length():number {
+    public get_lob_read_length():number {
         return addon.get_lob_read_length(this.id)
     }
-    set_lob_read_length(val:number) {
+    public set_lob_read_length(val:number) {
         return addon.set_lob_read_length(this.id, val)
     }
-    get_call_count():number {
+    public get_call_count():number {
         return addon.get_call_count(this.id)
     }
-    set_application_user(val:string) {
+    public set_application_user(val:string) {
         return addon.set_application_user(this.id, val)
     }
-    set_application_version(val:number) {
+    public set_application_version(val:number) {
         return addon.set_application_version(this.id, val)
     }
-    set_application_source(val:string) {
+    public set_application_source(val:string) {
         return addon.set_application_source(this.id, val)
     }
 
@@ -91,7 +90,7 @@ class Connection {
     /**
      * Creates a new prepared statemen, binds values and drops the prepared statement..
      */
-    async prepare_execute(stmt:string, data: any[]):Promise<any[]>{
+    public async prepare_execute(stmt:string, data: any[]):Promise<any[]>{
         let prep = await this.prepare(stmt);
         try{
             prep.add_batch(data);
@@ -104,13 +103,13 @@ class Connection {
     /**
      * Creates a new prepared statemen, binds values and drops the prepared statement..
      */
-    async execute_prepare(stmt:string, data: any[]):Promise<any[]>{
+    public async execute_prepare(stmt:string, data: any[]):Promise<any[]>{
         return this.prepare_execute(stmt, data);
     }
-    commit(){
+    public commit(){
         return addon.commit(this.id)
     }
-    rollback (){
+    public rollback (){
         return addon.rollback(this.id)
     }
 }
@@ -121,13 +120,13 @@ class PreparedStatement {
     constructor(id: string) {
         this.id = id;
     }
-    add_batch(data:any[]) {
+    public add_batch(data:any[]) {
         return addon.add_row(this.id, data)
     }
-    execute_batch():Promise<any[]> {
+    public execute_batch():Promise<any[]> {
         return execute_batch(this.id)
     }
-    drop() {
+    public drop() {
         return addon.dropStatement(this.id)
     }
 }
