@@ -1,11 +1,4 @@
-declare var addon: any;
-declare const promisify: any;
-declare const createClientProm: any;
-declare const statement: any;
-declare const multiple_statements_ignore_err: any;
-declare const prepare: any;
-declare const execute_batch: any;
-interface ConnectionParameters {
+interface IConnectionParameters {
     host: string;
     port: number;
     user: string;
@@ -18,12 +11,12 @@ interface ConnectionParameters {
  * @remarks
  * Don't forget to close() the connection.
  *
- * @param opt - The ConnectionParameters
+ * @param opt - The IConnectionParameters
  * @returns A Promise to a connection handle.
  *
  */
-declare function createClient(opt: ConnectionParameters): Promise<Connection>;
-declare class Connection {
+export declare function createClient(opt: IConnectionParameters): Promise<Connection>;
+export declare class Connection {
     private id;
     constructor(id: string);
     close(): any;
@@ -57,10 +50,11 @@ declare class Connection {
     commit(): any;
     rollback(): any;
 }
-declare class PreparedStatement {
+export declare class PreparedStatement {
     private id;
     constructor(id: string);
     add_batch(data: any[]): any;
     execute_batch(): Promise<any[]>;
     drop(): any;
 }
+export {};

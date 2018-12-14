@@ -25,14 +25,12 @@ interface IConnectionParameters {
  * @returns A Promise to a connection handle.
  *
  */
-async function createClient(opt: IConnectionParameters): Promise<Connection> {
+export async function createClient(opt: IConnectionParameters): Promise<Connection> {
     const client_id = await createClientProm(opt);
     return new Connection(client_id);
 }
 
-exports.createClient = createClient;
-
-class Connection {
+export class Connection {
     private id: string;
     constructor(id: string) {
         this.id = id;
@@ -114,7 +112,7 @@ class Connection {
     }
 }
 
-class PreparedStatement {
+export class PreparedStatement {
     private id: string;
     constructor(id: string) {
         this.id = id;

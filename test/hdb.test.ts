@@ -1,11 +1,11 @@
-const hdb = require('node-hdbconnect');
+import {createClient, Connection} from '../src/index'
 const fs = require("fs");
 
 async function getConnection() {
     try {
         var fs = require("fs");
         var connection_param = JSON.parse(fs.readFileSync("connection.json"));
-        let connection = await hdb.createClient(connection_param);
+        let connection = await createClient(connection_param);
         return connection;
     } catch(e) {
         console.log(e);

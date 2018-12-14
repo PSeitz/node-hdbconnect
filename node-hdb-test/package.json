@@ -4,7 +4,7 @@
   "description": "sample app for node-hdbconnect",
   "main": "example.js",
   "dependencies": {
-    "node-hdbconnect": "^0.1.0",
+    "node-hdbconnect": "../",
     "neon-cli": "^0.2.0"
   },
   "devDependencies": {},
