@@ -91,7 +91,7 @@ class Connection {
     /**
      * Creates a new prepared statemen, binds values and drops the prepared statement..
      */
-    async execute_prepare(stmt:string, data: any[]):Promise<any[]>{
+    async prepare_execute(stmt:string, data: any[]):Promise<any[]>{
         let prep = await this.prepare(stmt);
         try{
             prep.add_batch(data);
@@ -100,6 +100,12 @@ class Connection {
             prep != null && prep.drop();
             throw e;
         }
+    }
+    /**
+     * Creates a new prepared statemen, binds values and drops the prepared statement..
+     */
+    async execute_prepare(stmt:string, data: any[]):Promise<any[]>{
+        return this.prepare_execute(stmt, data);
     }
     commit(){
         return addon.commit(this.id)

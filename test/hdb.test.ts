@@ -126,7 +126,7 @@ test('test lob data types', async () => {
 
     await connection.statement("INSERT INTO lob_types (col_nclob) values('oge') ");
 
-    let prep = await connection.execute_prepare("INSERT INTO lob_types (col_blob, col_clob, col_nclob, col_text) values(?,?,?,?) ", [buf, "test", "test", "nice"]);
+    let prep = await connection.prepare_execute("INSERT INTO lob_types (col_blob, col_clob, col_nclob, col_text) values(?,?,?,?) ", [buf, "test", "test", "nice"]);
 
     var res = await connection.statement("SELECT COUNT(*) FROM lob_types");
     expect(res).toEqual([{"COUNT(*)": 2}]);
@@ -224,10 +224,10 @@ test('update with prepared statement', async () => {
        OR STEP_STATUS = 'failed')
        AND JOB_ID = ?`;
 
-    let res = await connection.execute_prepare(query, [4569145722365, "JOB_9000"]);
+    let res = await connection.prepare_execute(query, [4569145722365, "JOB_9000"]);
     expect(res).toEqual([1]);
 
-    res = await connection.execute_prepare(query, [4569145722365, "NO_HIT"]);
+    res = await connection.prepare_execute(query, [4569145722365, "NO_HIT"]);
     expect(res).toEqual([0]);
 
 });
@@ -260,25 +260,25 @@ test('test parameter binding corner cases', async () => {
     }
 
     { //prepare without parameters, empty add_batch
-        let res = await connection.execute_prepare(query_no_bound_params, [])
+        let res = await connection.prepare_execute(query_no_bound_params, [])
         expect(res).toEqual([{"TASKCOUNT": 2}]);
     }
 
     { //ERROR: prepare without parameters, undefined add_batch
-        await expect(connection.execute_prepare(query_no_bound_params, [undefined, undefined])).rejects.toThrow('too many parameters');
+        await expect(connection.prepare_execute(query_no_bound_params, [undefined, undefined])).rejects.toThrow('too many parameters');
     }
 
     { //prepare with correctly bound parameter
-        let res = await connection.execute_prepare(query_single_bound_params, ['initial'])
+        let res = await connection.prepare_execute(query_single_bound_params, ['initial'])
         expect(res).toEqual([{"TASKCOUNT": 2}]);
     }
 
     { //ERROR: prepare with too much bound parameter
-        await expect(connection.execute_prepare(query_single_bound_params, ['initial','running'])).rejects.toThrow('too many parameters');
+        await expect(connection.prepare_execute(query_single_bound_params, ['initial','running'])).rejects.toThrow('too many parameters');
     }
 
     { //ERROR: prepare with not enough bound parameter
-        await expect(connection.execute_prepare(query_single_bound_params, [])).rejects.toThrow('some paramters are missing');
+        await expect(connection.prepare_execute(query_single_bound_params, [])).rejects.toThrow('some paramters are missing');
     }
 
 

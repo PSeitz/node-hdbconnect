@@ -49,6 +49,10 @@ declare class Connection {
     /**
      * Creates a new prepared statemen, binds values and drops the prepared statement..
      */
+    prepare_execute(stmt: string, data: any[]): Promise<any[]>;
+    /**
+     * Creates a new prepared statemen, binds values and drops the prepared statement..
+     */
     execute_prepare(stmt: string, data: any[]): Promise<any[]>;
     commit(): any;
     rollback(): any;
