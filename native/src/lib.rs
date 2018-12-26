@@ -355,27 +355,7 @@ fn hdb_value_to_js<'a>(cx: &mut TaskContext<'a>, val: HdbValue) -> JsResult<'a, 
 
 }
 
-fn convert_rs<'a>(cx: &mut TaskContext<'a>, rs: ResultSet) -> JsResult<'a, JsArray> {
 
-    let js_array = JsArray::new(cx, 0);
-
-    let mut i = 0;
-    for row in rs {
-        let mut row = row.unwrap();
-        let js_object = JsObject::new(cx);
-        let mut j = 0;
-        row.reverse_values();
-        while let Some(col_val) = row.pop() {
-            let col_name = cx.string(row.get_fieldname(j).unwrap());
-            let mut col_val = hdb_value_to_js(cx,col_val).unwrap();
-            js_object.set(cx, col_name, col_val).unwrap();
-            j+=1;
-        }
-        let _  = js_array.set(cx, i as u32, js_object);
-        i += 1;
-    }
-    Ok(js_array)
-}
 
 
 struct StatementTask{
@@ -389,7 +369,7 @@ impl Task for StatementTask {
     type JsEvent = JsValue;
 
     fn perform(&self) -> Result<Self::Output, Self::Error> {
-        let res:HdbResult<HdbResponse> = (*CONNECTIONS).get_mut(&self.conn_id).unwrap().statement(&self.statement);
+        let res:HdbResult<HdbResponse> = (*CONNECTIONS).get_mut(&self.conn_id).ok_or_else(|| "connection already dropped".to_string()).map_err(|message|HdbError::Poison(message))?.statement(&self.statement);
         Ok(res?)
     }
 
@@ -425,7 +405,7 @@ impl Task for PrepareStatementTask {
     type JsEvent = JsString;
 
     fn perform(&self) -> Result<Self::Output, Self::Error> {
-        let prepared_statement = (*CONNECTIONS).get_mut(&self.conn_id).unwrap().prepare(&self.stmt)?;
+        let prepared_statement = (*CONNECTIONS).get_mut(&self.conn_id).ok_or_else(|| "connection already dropped".to_string()).map_err(|message|HdbError::Poison(message))?.prepare(&self.stmt)?;
         let id = nanoid::simple();
         (*PREPARED_STATEMENTS).insert_new(id.to_string(), Mutex::new(prepared_statement));
         Ok(id)
@@ -476,7 +456,7 @@ impl Task for MultipleStatementsIgnoreErr {
     type JsEvent = JsUndefined;
 
     fn perform(&self) -> Result<Self::Output, Self::Error> {
-        let res = (*CONNECTIONS).get_mut(&self.conn_id).unwrap().multiple_statements_ignore_err(self.queries.clone());
+        let res = (*CONNECTIONS).get_mut(&self.conn_id).ok_or_else(|| "connection already dropped".to_string()).map_err(|message|HdbError::Poison(message))?.multiple_statements_ignore_err(self.queries.clone());
         Ok(res)
     }
 
@@ -521,6 +501,7 @@ fn add_row(mut cx:FunctionContext) -> JsResult<JsValue>{ //HdbResult<()>
             let data:Vec<HdbValue> = vec.into_iter().enumerate().map(|(i, val)| {
                 js_to_hdb_value(&mut cx, val, params_desc[i].clone())
             }).collect();
+            println!("{:?}", data);
             data
         };
         let res = prep.add_row_to_batch(data);
@@ -572,6 +553,27 @@ fn convert_hdbresponse<'a>(cx: &mut TaskContext<'a>, res: HdbResponse) -> JsResu
         }
         Ok(js_array.upcast())
     }
+}
+fn convert_rs<'a>(cx: &mut TaskContext<'a>, rs: ResultSet) -> JsResult<'a, JsArray> {
+
+    let js_array = JsArray::new(cx, 0);
+
+    let mut i = 0;
+    for row in rs {
+        let mut row = row.unwrap();
+        let js_object = JsObject::new(cx);
+        let mut j = 0;
+        row.reverse_values();
+        while let Some(col_val) = row.pop() {
+            let col_name = cx.string(row.get_fieldname(j).unwrap());
+            let mut col_val = hdb_value_to_js(cx,col_val).unwrap();
+            js_object.set(cx, col_name, col_val).unwrap();
+            j+=1;
+        }
+        let _  = js_array.set(cx, i as u32, js_object);
+        i += 1;
+    }
+    Ok(js_array)
 }
 
 struct ExecPreparedStatementTask{
