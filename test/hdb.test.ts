@@ -41,8 +41,8 @@ test('prepfail ', async () => {
     insert_stmt.add_batch([13, "test text blubla3"]);
     insert_stmt.add_batch([14, "test text blubla4"]);
     insert_stmt.add_batch([15, "test text blubla5"]);
-    await insert_stmt.execute_batch_and_drop();
 
+    await expect(insert_stmt.execute_batch_and_drop()).rejects.toEqual(new Error('unique constraint violated")'));
 
 });
 

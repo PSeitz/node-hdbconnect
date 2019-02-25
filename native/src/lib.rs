@@ -441,7 +441,6 @@ fn add_row(mut cx:FunctionContext) -> JsResult<JsValue>{ //HdbResult<()>
             let data:Vec<HdbValue> = vec.into_iter().enumerate().map(|(i, val)| {
                 js_to_hdb_value(&mut cx, val, params_desc[i].clone())
             }).collect();
-            println!("{:?}", data);
             data
         };
         let res = prep.add_row_to_batch(data);
@@ -493,27 +492,6 @@ fn convert_hdbresponse<'a>(cx: &mut TaskContext<'a>, res: HdbResponse) -> JsResu
         }
         Ok(js_array.upcast())
     }
-}
-fn convert_rs<'a>(cx: &mut TaskContext<'a>, rs: ResultSet) -> JsResult<'a, JsArray> {
-
-    let js_array = JsArray::new(cx, 0);
-
-    let mut i = 0;
-    for row in rs {
-        let mut row = row.unwrap();
-        let js_object = JsObject::new(cx);
-        let mut j = 0;
-        row.reverse_values();
-        while let Some(col_val) = row.pop() {
-            let col_name = cx.string(row.get_fieldname(j).unwrap());
-            let mut col_val = hdb_value_to_js(cx,col_val).unwrap();
-            js_object.set(cx, col_name, col_val).unwrap();
-            j+=1;
-        }
-        let _  = js_array.set(cx, i as u32, js_object);
-        i += 1;
-    }
-    Ok(js_array)
 }
 
 struct ExecPreparedStatementTask{
