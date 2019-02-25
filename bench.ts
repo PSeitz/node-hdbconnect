@@ -19,79 +19,72 @@ async function getConnection() {
 class Packet{
     public connection: Connection;
     private num: number;
-    constructor(connection: Connection) {
+    constructor(connection: Connection, num:number) {
         this.connection = connection;
+        this.num = num;
     }
 
     public prepare() {
-        return this.connection.statement(`create table FOO_SQUARE${this.num} ( f1 INT primary key, f2 NVARCHAR(100)`)
+        let query = `create table FOO_SQUARE${this.num} ( f1 INT primary key, f2 NVARCHAR(100))`;
+        return this.connection.statement(query)
     }
-
 
     public async query() {
+        console.log("prepare");
+        
         let insert_stmt = await this.connection.prepare(`insert into FOO_SQUARE${this.num} (f1, f2) values(?,?)`);
-        insert_stmt.add_batch([11, "test text blubla"]);
-        insert_stmt.add_batch([12, "test text blubla"]);
-        insert_stmt.add_batch([13, "test text blubla"]);
-        insert_stmt.add_batch([14, "test text blubla"]);
-        insert_stmt.add_batch([15, "test text blubla"]);
-        return insert_stmt.execute_batch_and_drop()
+        console.log("add_batch");
+        insert_stmt.add_batch([11, "test text blubla1"]);
+        insert_stmt.add_batch([12, "test text blubla2"]);
+        insert_stmt.add_batch([13, "test text blubla3"]);
+        insert_stmt.add_batch([14, "test text blubla4"]);
+        insert_stmt.add_batch([15, "test text blubla5"]);
+        console.log("execute_batch");
+        let res = await insert_stmt.execute_batch_and_drop()
+        console.log("yop" + res);
+        return res;
+        // return insert_stmt.execute_batch_and_drop()
     }
 
+    // public query() {
+    //     return this.connection.statement(`insert into FOO_SQUARE${this.num} (f1, f2) values(13, 'test text blubla')`)
+    // }
 
     public cleanup() {
-        return this.connection.statement(`drop table FOO_SQUARE${this.num}`);
+        return this.connection.multiple_statements_ignore_err([`drop table FOO_SQUARE${this.num}`]);
     }
 }
 
-async function startBench(argument) {
-    let nums = [...Array(5)].map((_,i) => i);
-    let query_packets:[Packet] = await Promise.all(nums.map(async (i)=>{
+async function startBench() {
+    let nums = [...Array(1)].map((_,i) => i);
+    let query_packets:Packet[] = await Promise.all(nums.map(async (i)=>{
         let connection = await getConnection();
-        return new Packet(connection)
-        // return {
-        //     connection:connection,
-        //     prepare: connection=>{
-        //         return connection.statement(`create table FOO_SQUARE${i} ( f1 INT primary key, f2 NVARCHAR(100)`)
-        //     },
-        //     query: async (connection)=>{
-        //         let insert_stmt = await connection.prepare(`insert into FOO_SQUARE${i} (f1, f2) values(?,?)`);
-        //         insert_stmt.add_batch([11, "test text blubla"]);
-        //         insert_stmt.add_batch([12, "test text blubla"]);
-        //         insert_stmt.add_batch([13, "test text blubla"]);
-        //         insert_stmt.add_batch([14, "test text blubla"]);
-        //         insert_stmt.add_batch([15, "test text blubla"]);
-        //         return insert_stmt.execute_batch_and_drop()
-        //     },
-        //     cleanup: (connection)=>{
-        //         return connection.statement(`drop table FOO_SQUARE${i}`);
-        //     }
-        // }
+        return new Packet(connection, i)
     }));
 
     var t0 = performance.now();
-
+    await Promise.all(query_packets.map(el => el.cleanup()));
     await Promise.all(query_packets.map(el => el.prepare()));
 
-    for (let el of Array(10).fill())
-    {
-        await Promise.all(query_packets.map(el => el.connection.close()));
-    }
+    // for (let el in [...Array(2)])
+    // {
+    //     console.log(el);
+    //     let res = await Promise.all(query_packets.map(el => el.query()));
+    //     console.log(res);
+        
+    // }
+
+    await Promise.all(query_packets.map(el => el.query()));
+    await Promise.all(query_packets.map(el => el.query()));
+
+    console.log("el");
+    await Promise.all(query_packets.map(el => el.query()));
 
     await Promise.all(query_packets.map(el => el.cleanup()));
-
+    await Promise.all(query_packets.map(el => el.connection.close()));
 
     var t1 = performance.now();
     console.log("Call to doSomething took " + (t1 - t0) + " milliseconds.")
-    // query_packets.map(el => el.query(el.connection))
-
-    // for (let connection of connections)
-    // {
-    //     Promise.all([p1, p2, p3])
-    //     .then(values => {
-    //         console.log(values); // [3, 1337, "foo"]
-    //     });
-    // }
 }
 
 startBench();
