@@ -12,10 +12,9 @@ use chashmap::CHashMap;
 #[macro_use]
 extern crate lazy_static;
 extern crate parking_lot;
-extern crate serde_db;
 extern crate serde_bytes;
 
-use serde_db::ser::to_params;
+use hdbconnect::serde_db::ser::to_params;
 
 use hdbconnect::{Connection, HdbResult, HdbError, HdbValue, HdbResponse, PreparedStatement, HdbReturnValue, ParameterDescriptor};
 use hdbconnect::ResultSet;
@@ -53,6 +52,18 @@ macro_rules! check_res_undefined {
         });
     )
 }
+
+macro_rules! buffer {
+    ($cx:ident, $val:ident) => {
+        let mut dat = $cx.buffer($val.len() as u32).unwrap();
+        $cx.borrow_mut(&mut dat, |data| {
+            let slice = data.as_mut_slice::<u8>();
+            slice.clone_from_slice(&$val);
+        });
+        return Ok(dat.upcast());
+    }
+}
+
 
 #[derive(Serialize, Debug, Deserialize)]
 struct ConnectionParams {
@@ -199,53 +210,16 @@ fn set_application_source(mut cx:FunctionContext) -> JsResult<JsValue>{ //HdbRes
     check_res_undefined!(res, cx);
 }
 
-macro_rules! try_cast {
-    ($cx:ident, $val:ident, $cast_into:ty, $on_success:expr) => {
-        if let Some(val) = $val.into_typed::<$cast_into>().unwrap() {
-            return Ok($on_success(val))
-        }else{
-            return Ok($cx.null().upcast());
-        }
-    }
-}
-
-macro_rules! try_cast_string {
-    ($cx:ident, $val:ident, $cast_into:ty) => {
-        if let Some(val) = $val.into_typed::<$cast_into>().unwrap() {
-            return Ok($cx.string(val).upcast())
-        }else{
-            return Ok($cx.null().upcast());
-        }
-    }
-}
-macro_rules! try_cast_buffer {
-    ($cx:ident, $val:ident, $cast_into:ty) => {
-        if let Some(val) = $val.into_typed::<$cast_into>().unwrap() {
-            buffer!($cx, val);
-        }else{
-            return Ok($cx.null().upcast());
-        }
-    }
-}
-
-macro_rules! buffer {
-    ($cx:ident, $val:ident) => {
-        let mut dat = $cx.buffer($val.len() as u32).unwrap();
-        $cx.borrow_mut(&mut dat, |data| {
-            let slice = data.as_mut_slice::<u8>();
-            slice.clone_from_slice(&$val);
-        });
-        return Ok(dat.upcast());
-    }
-}
-
-fn hdb_value_to_js<'a>(cx: &mut TaskContext<'a>, val: HdbValue) -> JsResult<'a, JsValue> {
+fn hdb_value_to_js<'a>(cx: &mut TaskContext<'a>, val: hdbconnect::HdbValue<'static>) -> JsResult<'a, JsValue> {
     if val.is_null() {
         return Ok(cx.null().upcast());
     }
-    use serde_db::de::DbValue;
+    use hdbconnect::serde_db::de::DbValue;
     match val {
-        HdbValue::NOTHING => {
+        HdbValue::NULL => {
+            return Ok(cx.undefined().upcast());
+        }
+        HdbValue::NOTHING | HdbValue::LOBSTREAM(_) | HdbValue::STR(_)=> { // TODO FIX LOBSTREAM/STR
             return Ok(cx.undefined().upcast());
         }
         HdbValue::TINYINT(_)
@@ -261,10 +235,7 @@ fn hdb_value_to_js<'a>(cx: &mut TaskContext<'a>, val: HdbValue) -> JsResult<'a, 
         | HdbValue::DECIMAL(_) => {
             return Ok(cx.number(val.into_typed::<f64>().unwrap()).upcast())
         }
-        HdbValue::CHAR(el) | HdbValue::VARCHAR(el) | HdbValue::NCHAR(el) | HdbValue::NVARCHAR(el) => {
-            return Ok(cx.string(el).upcast())
-        }
-        HdbValue::BINARY(el) | HdbValue::VARBINARY(el) | HdbValue::BSTRING(el) => {
+        HdbValue::BINARY(el) => {
             let mut dat = cx.buffer(el.len() as u32).unwrap();
             cx.borrow_mut(&mut dat, |data| {
                 let slice = data.as_mut_slice::<u8>();
@@ -284,72 +255,18 @@ fn hdb_value_to_js<'a>(cx: &mut TaskContext<'a>, val: HdbValue) -> JsResult<'a, 
         HdbValue::BOOLEAN(el) => {
             return Ok(cx.boolean(el).upcast())
         }
-        HdbValue::STRING(_) | HdbValue::NSTRING(_) | HdbValue::TEXT(_) | HdbValue::SHORTTEXT(_) => {
+        HdbValue::STRING(_) => {
+            return Ok(cx.string(val.into_typed::<String>().unwrap()).upcast())
+        }
+        HdbValue::GEOMETRY(_) | HdbValue::POINT(_) => {
             return Ok(cx.string(val.into_typed::<String>().unwrap()).upcast())
         }
         HdbValue::LONGDATE(_) | HdbValue::SECONDDATE(_) | HdbValue::DAYDATE(_) | HdbValue::SECONDTIME(_) => {
             return Ok(cx.string(val.into_typed::<String>().unwrap()).upcast())
         }
-        HdbValue::N_TINYINT(_)
-        | HdbValue::N_SMALLINT(_)
-        | HdbValue::N_INT(_)
-        | HdbValue::N_BIGINT(_) => {
-            try_cast!(cx, val, Option<isize>, (|val| cx.number(val as f64).upcast()))
-        }
-        | HdbValue::N_DECIMAL(_)
-        | HdbValue::N_REAL(_)
-        | HdbValue::N_DOUBLE(_) => {
-            try_cast!(cx, val, Option<f64>, (|val| cx.number(val as f64).upcast()))
-        }
-        HdbValue::N_CHAR(_)
-        | HdbValue::N_VARCHAR(_)
-        | HdbValue::N_NVARCHAR(_)
-        | HdbValue::N_NCHAR(_) => {
-            try_cast_string!(cx, val, Option<String>);
-        }
-        HdbValue::N_BINARY(el) | HdbValue::N_VARBINARY(el) | HdbValue::N_BSTRING(el) => {
-            if let Some(el) = el {
-                buffer!(cx, el);
-            }
-            return Ok(cx.null().upcast());
-        }
-        HdbValue::N_CLOB(_)  => {
-            try_cast_buffer!(cx, val, Option<Vec<u8>>);
-        }
-        HdbValue::N_NCLOB(_) => {
-            try_cast_string!(cx, val, Option<String>);
-        }
         HdbValue::NCLOB(_) => {
             let val = val.into_typed::<String>().unwrap();
             return Ok(cx.string(val).upcast());
-        }
-        HdbValue::N_BLOB(_) => {
-            if let Some(val) = val.try_into::<Option<serde_bytes::ByteBuf>>().unwrap() {
-                let val: &[u8] = val.as_ref();
-                buffer!(cx, val);
-            }else{
-                return Ok(cx.null().upcast());
-            }
-        }
-        HdbValue::N_BOOLEAN(el) => {
-            if let Some(el) = el {
-                return Ok(cx.boolean(el).upcast())
-            }
-            return Ok(cx.null().upcast());
-        }
-        HdbValue::N_STRING(_) | HdbValue::N_NSTRING(_) | HdbValue::N_TEXT(_) | HdbValue::N_SHORTTEXT(_) => {
-            if let Some(val) = val.into_typed::<Option<String>>().unwrap() {
-                return Ok(cx.string(val).upcast())
-            }else{
-                return Ok(cx.null().upcast());
-            }
-        }
-        HdbValue::N_LONGDATE(_) | HdbValue::N_SECONDDATE(_) | HdbValue::N_DAYDATE(_) | HdbValue::N_SECONDTIME(_) => {
-            try_cast_string!(cx, val, Option<String>);
-        }
-
-        HdbValue::SMALLDECIMAL(_) | HdbValue::N_SMALLDECIMAL(_) => {
-            return cx.throw_error("SMALLDECIMAL not yet implemented");
         }
     }
 
@@ -359,18 +276,21 @@ fn convert_rs<'a>(cx: &mut TaskContext<'a>, rs: ResultSet) -> JsResult<'a, JsArr
 
     let js_array = JsArray::new(cx, 0);
 
+    let metadata = rs.metadata().clone();
+
     let mut i = 0;
     for row in rs {
         let mut row = row.unwrap();
         let js_object = JsObject::new(cx);
         let mut j = 0;
-        row.reverse_values();
-        while let Some(col_val) = row.pop() {
-            let col_name = cx.string(row.get_fieldname(j).unwrap());
+
+        for col_val in row {
+            let col_name = cx.string(metadata.columnname(j).unwrap());
             let mut col_val = hdb_value_to_js(cx,col_val).unwrap();
             js_object.set(cx, col_name, col_val).unwrap();
             j+=1;
         }
+
         let _  = js_array.set(cx, i as u32, js_object);
         i += 1;
     }
@@ -489,7 +409,7 @@ impl Task for MultipleStatementsIgnoreErr {
 }
 
 
-// // This generic method can handle all kinds of calls, and thus has the most complex return type. In many cases it will be more appropriate to use one of the methods query(), dml(), exec(), which have the adequate simple result type you usually want.
+// This generic method can handle all kinds of calls, and thus has the most complex return type. In many cases it will be more appropriate to use one of the methods query(), dml(), exec(), which have the adequate simple result type you usually want.
 fn multiple_statements_ignore_err(mut cx:FunctionContext) -> JsResult<JsUndefined>{ //HdbResult<ResultSet>
     let conn_id = cx.argument::<JsString>(0)?.value();
     let queries:Vec<_> = cx.argument::<JsArray>(1)?.to_vec(&mut cx)?;
@@ -511,13 +431,13 @@ fn add_row(mut cx:FunctionContext) -> JsResult<JsValue>{ //HdbResult<()>
     let mut prep = prepo.as_mut().unwrap().lock();
 
 
-    if vec.len() > prep.input_parameter_descriptors().map(|el|el.len()).unwrap_or(0){
+    if vec.len() > prep.parameter_descriptors().map(|el|el.len()).unwrap_or(0){
         return cx.throw_error("too many parameters");
     }
 
-    if prep.input_parameter_descriptors().is_some() {
+    if prep.parameter_descriptors().is_some() {
         let data = {
-            let params_desc = prep.input_parameter_descriptors().unwrap();
+            let params_desc = prep.parameter_descriptors().unwrap();
             let data:Vec<HdbValue> = vec.into_iter().enumerate().map(|(i, val)| {
                 js_to_hdb_value(&mut cx, val, params_desc[i].clone())
             }).collect();
@@ -608,18 +528,18 @@ fn execute_batch(mut cx:FunctionContext) -> JsResult<JsUndefined>{ //HdbResult<(
 }
 
 use serde_bytes::{Bytes};
-fn js_to_hdb_value<'a>(cx: &mut FunctionContext<'a>, v: Handle<JsValue>, desc: ParameterDescriptor) -> HdbValue {
+fn js_to_hdb_value<'a>(cx: &mut FunctionContext<'a>, v: Handle<JsValue>, desc: ParameterDescriptor) -> HdbValue<'static>{
     let params = &[desc];
     if v.is_a::<JsString>() {
         let v = v.downcast::<JsString>().unwrap().value();
-        return to_params(&v, params).unwrap().pop().unwrap();
+        return to_params(&v, &mut params.iter()).unwrap().pop().unwrap();
     }
     if v.is_a::<JsNumber>() {
         let v = v.downcast::<JsNumber>().unwrap().value();
-        if let Ok(mut val) = to_params(&v, params ) {
+        if let Ok(mut val) = to_params(&v, &mut params.iter() ) {
             return val.pop().unwrap()
         }
-        if let Ok(mut val) = to_params(&(v as u64), params) {
+        if let Ok(mut val) = to_params(&(v as u64), &mut params.iter()) {
             return val.pop().unwrap()
         }
     }
@@ -628,24 +548,24 @@ fn js_to_hdb_value<'a>(cx: &mut FunctionContext<'a>, v: Handle<JsValue>, desc: P
         let slice: &[u8] = cx.borrow(&v, |data| {
             data.as_slice::<u8>()
         });
-        return to_params(&Bytes::new(&*slice), params).unwrap().pop().unwrap();
+        return to_params(&Bytes::new(&*slice), &mut params.iter()).unwrap().pop().unwrap();
     }
     if v.is_a::<JsBuffer>() {
         let v = v.downcast::<JsBuffer>().unwrap();
         let slice: &[u8] = cx.borrow(&v, |data| {
             data.as_slice::<u8>()
         });
-        return to_params(&Bytes::new(&*slice), params).unwrap().pop().unwrap();
+        return to_params(&Bytes::new(&*slice), &mut params.iter()).unwrap().pop().unwrap();
     }
     if v.is_a::<JsBoolean>() {
         let v = v.downcast::<JsBoolean>().unwrap().value();
-        return to_params(&v, params).unwrap().pop().unwrap();
+        return to_params(&v, &mut params.iter()).unwrap().pop().unwrap();
     }
     if v.is_a::<JsUndefined>() {
-        return HdbValue::N_TEXT(None);
+        return HdbValue::NULL;
     }
     if v.is_a::<JsNull>() {
-        return HdbValue::N_TEXT(None);
+        return HdbValue::NULL;
     }
     if v.is_a::<JsObject>() {
         let dat:String = format!("object as parameter not supported {:?}", v.to_string(cx).map(|val|val.value()).unwrap_or_else(|_|"".to_string()));
