@@ -1,15 +1,13 @@
+
+const fs = require('fs');
 const hdb = require('node-hdbconnect');
 async function test(){
 
     let connection;
     try{
-        connection = await hdb.createClient({
-            "host": "ld2512",
-            "port": 30515,
-            "user": "SYSTEM",
-            "password": "manager"
-        }
-        );
+
+        let connection_param = JSON.parse(fs.readFileSync("connection.json"));
+        connection = await hdb.createClient(connection_param);
 
         console.log(await connection.statement("SELECT * FROM DUMMY"))
 

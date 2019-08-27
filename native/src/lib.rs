@@ -163,7 +163,7 @@ fn get_lob_read_length(mut cx:FunctionContext) -> JsResult<JsValue>{ //HdbResult
 fn set_lob_read_length(mut cx:FunctionContext) -> JsResult<JsValue>{ //HdbResult<()>
     let client_id = cx.argument::<JsString>(0)?.value();
     let val = cx.argument::<JsNumber>(1)?.value();
-    let res = (*CONNECTIONS).get_mut(&client_id).unwrap().set_lob_read_length(val as i32);
+    let res = (*CONNECTIONS).get_mut(&client_id).unwrap().set_lob_read_length(val as u32);
     check_res_undefined!(res, cx);
 }
 
@@ -280,13 +280,13 @@ fn convert_rs<'a>(cx: &mut TaskContext<'a>, rs: ResultSet) -> JsResult<'a, JsArr
 
     let mut i = 0;
     for row in rs {
-        let mut row = row.unwrap();
+        let row = row.unwrap();
         let js_object = JsObject::new(cx);
         let mut j = 0;
 
         for col_val in row {
             let col_name = cx.string(metadata.columnname(j).unwrap());
-            let mut col_val = hdb_value_to_js(cx,col_val).unwrap();
+            let col_val = hdb_value_to_js(cx,col_val).unwrap();
             js_object.set(cx, col_name, col_val).unwrap();
             j+=1;
         }
